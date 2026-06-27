@@ -1,4 +1,5 @@
 # campusflow
+<<<<<<< HEAD
 
 A new Flutter project.
 
@@ -15,3 +16,6 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+=======
+AI-Based Event &amp; Venue Management System
+>>>>>>> e8e9330e5fb36ac99b532ab9aa8e2e37b17958d8
