@@ -1,0 +1,30 @@
+name: campusflow
+description: "AI-Based Event & Venue Management System"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '^3.12.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Supabase (Core package — no passkeys dependency)
+  supabase: ^2.6.0
+
+  # State Management
+  provider: ^6.1.2
+
+  # UI & Utils
+  google_fonts: ^6.2.1
+  intl: ^0.20.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  
