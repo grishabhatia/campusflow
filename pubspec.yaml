@@ -9,16 +9,12 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
-  # Supabase (Core package — no passkeys dependency)
-  supabase: ^2.6.0
-
-  # State Management
+  supabase_flutter: ^2.8.0
   provider: ^6.1.2
-
-  # UI & Utils
   google_fonts: ^6.2.1
   intl: ^0.20.2
+  excel: ^4.0.6
+  universal_html: ^2.2.4
 
 dev_dependencies:
   flutter_test:
@@ -27,4 +23,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  

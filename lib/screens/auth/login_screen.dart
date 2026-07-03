@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_auth_service.dart';
-import '../student/student_home_screen.dart';
-import '../admin/admin_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -82,30 +80,22 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text.trim(),
       );
       if (!mounted) return;
-      final userId = _auth.currentUserId!;
-      await _auth.createUserIfNotExists(
-        userId,
-        _emailController.text.trim(),
-        'User',
-      );
-      final role = await _auth.getUserRole(userId);
-      if (role == 'admin') {
-        Navigator.pushReplacement(
+
+      final userId = _auth.currentUserId;
+      if (userId != null) {
+        final role = await _auth.getUserRole(userId);
+        Navigator.pushReplacementNamed(
           context,
-          MaterialPageRoute(builder: (_) => const AdminHomeScreen()),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const StudentHomeScreen()),
+          role == 'admin' ? '/admin' : '/student',
         );
       }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        SnackBar(content: Text('Login Error: $e')),
       );
     }
-    setState(() => _isLoading = false);
+    if (mounted) setState(() => _isLoading = false);
   }
 
   void _showRegisterDialog() {
@@ -148,13 +138,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   passwordController.text.trim(),
                   nameController.text.trim(),
                 );
+                if (!context.mounted) return;
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Registration successful!')),
+                  const SnackBar(
+                    content: Text('Registration successful! Please login.'),
+                  ),
                 );
               } catch (e) {
+                if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error: $e')),
+                  SnackBar(content: Text('Register Error: $e')),
                 );
               }
             },
