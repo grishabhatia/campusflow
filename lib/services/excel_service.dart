@@ -5,18 +5,19 @@ import 'admin_service.dart';
 class ExcelService {
   final _adminService = AdminService();
 
-  Future<void> exportEventsToExcel() async {
-    final events = await _adminService.getAllEvents();
+  Future<void> exportToExcel() async {
+    final reqs = await _adminService.getAllRequisitions();
 
     final excel = Excel.createExcel();
-    final sheet = excel['Events Report'];
+    final sheet = excel['Requisitions Report'];
 
-    // ─── Header row ────────────────────────────────────────────────────
+    // ─── Headers ───────────────────────────────────────────────────────
     final headers = [
-      'Event Name', 'Organization', 'Organizer',
-      'Date', 'Start Time', 'End Time',
-      'Room', 'Building', 'Expected Crowd',
-      'Status', 'Special Instructions',
+      'Venue', 'Purpose', 'Organizer', 'Email',
+      'Booking Date', 'Booking Time',
+      'Event From', 'Event To',
+      'Expected Strength', 'No. of Slots',
+      'Status', 'Extra Furniture',
     ];
 
     for (int i = 0; i < headers.length; i++) {
@@ -33,35 +34,32 @@ class ExcelService {
     }
 
     // ─── Data rows ─────────────────────────────────────────────────────
-    for (int rowIdx = 0; rowIdx < events.length; rowIdx++) {
-      final e = events[rowIdx];
-      final room = e['rooms'] as Map<String, dynamic>?;
-      final user = e['users'] as Map<String, dynamic>?;
+    for (int rowIdx = 0; rowIdx < reqs.length; rowIdx++) {
+      final r = reqs[rowIdx];
+      final user = r['users'] as Map<String, dynamic>?;
+      final slots = (r['slots'] as List?)?.length ?? 0;
 
       final rowData = [
-        e['event_name'] ?? '',
-        e['organization'] ?? '',
+        r['venue'] ?? '',
+        r['purpose'] ?? '',
         user?['name'] ?? '',
-        e['event_date'] ?? '',
-        AdminService.minutesToTime(e['start_time'] ?? 0),
-        AdminService.minutesToTime(e['end_time'] ?? 0),
-        room?['room_name'] ?? '',
-        room?['building'] ?? '',
-        '${e['expected_crowd'] ?? 0}',
-        (e['status'] ?? '').toUpperCase(),
-        e['special_instructions'] ?? '',
+        user?['email'] ?? '',
+        r['booking_date'] ?? '',
+        r['booking_time'] ?? '',
+        r['event_time_from'] ?? '',
+        r['event_time_to'] ?? '',
+        r['expected_strength'] ?? '',
+        '$slots',
+        (r['status'] ?? '').toUpperCase(),
+        r['extra_furniture'] ?? '',
       ];
 
       for (int colIdx = 0; colIdx < rowData.length; colIdx++) {
         final cell = sheet.cell(
           CellIndex.indexByColumnRow(
-            columnIndex: colIdx,
-            rowIndex: rowIdx + 1,
-          ),
+              columnIndex: colIdx, rowIndex: rowIdx + 1),
         );
         cell.value = TextCellValue(rowData[colIdx]);
-
-        // Alternating row colors
         if (rowIdx % 2 == 0) {
           cell.cellStyle = CellStyle(
             backgroundColorHex: ExcelColor.fromHexString('#E3F2FD'),
@@ -70,20 +68,21 @@ class ExcelService {
       }
     }
 
-    // ─── Set column widths ─────────────────────────────────────────────
+    // ─── Column widths ─────────────────────────────────────────────────
     sheet.setColumnWidth(0, 25);
-    sheet.setColumnWidth(1, 18);
+    sheet.setColumnWidth(1, 25);
     sheet.setColumnWidth(2, 20);
-    sheet.setColumnWidth(3, 14);
-    sheet.setColumnWidth(4, 12);
+    sheet.setColumnWidth(3, 25);
+    sheet.setColumnWidth(4, 14);
     sheet.setColumnWidth(5, 12);
-    sheet.setColumnWidth(6, 22);
-    sheet.setColumnWidth(7, 18);
-    sheet.setColumnWidth(8, 16);
+    sheet.setColumnWidth(6, 12);
+    sheet.setColumnWidth(7, 12);
+    sheet.setColumnWidth(8, 18);
     sheet.setColumnWidth(9, 12);
-    sheet.setColumnWidth(10, 30);
+    sheet.setColumnWidth(10, 12);
+    sheet.setColumnWidth(11, 20);
 
-    // ─── Download (web) ────────────────────────────────────────────────
+    // ─── Download ──────────────────────────────────────────────────────
     final bytes = excel.encode();
     if (bytes == null) throw Exception('Excel encoding failed');
 
@@ -93,12 +92,14 @@ class ExcelService {
     );
     final url = html.Url.createObjectUrlFromBlob(blob);
     final anchor = html.AnchorElement(href: url)
-      ..setAttribute('download', 'campusflow_events_${_todayString()}.xlsx')
+      ..setAttribute(
+          'download',
+          'campusflow_requisitions_${_today()}.xlsx')
       ..click();
     html.Url.revokeObjectUrl(url);
   }
 
-  String _todayString() {
+  String _today() {
     final now = DateTime.now();
     return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }

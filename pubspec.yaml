@@ -1,5 +1,5 @@
 name: campusflow
-description: "AI-Based Event & Venue Management System"
+description: "AI-Based Event & Venue Management System — Manav Rachna University"
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -15,6 +15,11 @@ dependencies:
   intl: ^0.20.2
   excel: ^4.0.6
   universal_html: ^2.2.4
+  google_generative_ai: ^0.4.0
+  shimmer: ^3.0.0
+  fl_chart: ^0.68.0
+  shared_preferences: ^2.3.0
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:

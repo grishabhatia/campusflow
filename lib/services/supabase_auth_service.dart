@@ -1,6 +1,10 @@
-import '../main.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';  // ✅ Add this for debugPrint
 
 class SupabaseAuthService {
+  // ✅ Add this getter
+  SupabaseClient get supabase => Supabase.instance.client;
+
   Future<void> login(String email, String password) async {
     await supabase.auth.signInWithPassword(
       email: email,
@@ -48,8 +52,7 @@ class SupabaseAuthService {
     }
   }
 
-  Future<void> createUserIfNotExists(
-      String userId, String email, String name) async {
+  Future<void> createUserIfNotExists(String userId, String email, String name) async {
     try {
       final existing = await supabase
           .from('users')
@@ -68,7 +71,7 @@ class SupabaseAuthService {
         });
       }
     } catch (e) {
-      print('Error creating user: $e');
+      debugPrint('Error creating user: $e');  // ✅ ab kaam karega
     }
   }
 }

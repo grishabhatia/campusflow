@@ -1,116 +1,144 @@
-import '../main.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';  // ✅ Direct import
 
 class AdminService {
-  // ─── Fetch all events with room + organizer info ───────────────────────
-  Future<List<Map<String, dynamic>>> getAllEvents() async {
+  // ✅ Direct Supabase client
+  final supabase = Supabase.instance.client;
+
+  Future<List<Map<String, dynamic>>> getAllRequisitions() async {
     final response = await supabase
-        .from('events')
-        .select('*, rooms(room_name, room_number, building, floor, capacity), users(name, email)')
+        .from('requisitions')
+        .select('*, users(name, email)')
         .order('created_at', ascending: false);
     return List<Map<String, dynamic>>.from(response);
   }
 
-  // ─── Fetch only pending events ─────────────────────────────────────────
-  Future<List<Map<String, dynamic>>> getPendingEvents() async {
+  Future<List<Map<String, dynamic>>> getPendingRequisitions() async {
     final response = await supabase
-        .from('events')
-        .select('*, rooms(room_name, room_number, building, floor, capacity), users(name, email)')
+        .from('requisitions')
+        .select('*, users(name, email)')
         .eq('status', 'pending')
-        .order('event_date', ascending: true);
+        .order('created_at', ascending: true);
     return List<Map<String, dynamic>>.from(response);
   }
 
-  // ─── Fetch approved events ─────────────────────────────────────────────
-  Future<List<Map<String, dynamic>>> getApprovedEvents() async {
+  Future<List<Map<String, dynamic>>> getApprovedRequisitions() async {
     final response = await supabase
-        .from('events')
-        .select('*, rooms(room_name, room_number, building, floor, capacity), users(name, email)')
+        .from('requisitions')
+        .select('*, users(name, email)')
         .eq('status', 'approved')
-        .order('event_date', ascending: true);
+        .order('created_at', ascending: false);
     return List<Map<String, dynamic>>.from(response);
   }
 
-  // ─── Stats ─────────────────────────────────────────────────────────────
   Future<Map<String, int>> getStats() async {
-    final all = await supabase.from('events').select('status');
+    final all = await supabase.from('requisitions').select('status');
     final allList = List<Map<String, dynamic>>.from(all);
 
     final today = DateTime.now().toIso8601String().split('T')[0];
     final todayEvents = await supabase
-        .from('events')
+        .from('requisitions')
         .select('id')
-        .eq('event_date', today)
+        .eq('booking_date', today)
         .eq('status', 'approved');
 
     int pending = 0, approved = 0, rejected = 0;
     for (final e in allList) {
       switch (e['status']) {
-        case 'pending': pending++; break;
+        case 'pending':  pending++;  break;
         case 'approved': approved++; break;
         case 'rejected': rejected++; break;
       }
     }
 
     return {
-      'pending': pending,
+      'pending':  pending,
       'approved': approved,
       'rejected': rejected,
-      'today': (todayEvents as List).length,
+      'today':    (todayEvents as List).length,
     };
   }
 
-  // ─── Approve event ─────────────────────────────────────────────────────
-  Future<void> approveEvent(String eventId) async {
+  Future<void> approveRequisition(String id) async {
     await supabase
-        .from('events')
+        .from('requisitions')
         .update({'status': 'approved'})
-        .eq('id', eventId);
+        .eq('id', id);
   }
 
-  // ─── Reject event ──────────────────────────────────────────────────────
-  Future<void> rejectEvent(String eventId, {String reason = ''}) async {
+  Future<void> rejectRequisition(String id, {String reason = ''}) async {
     await supabase
-        .from('events')
+        .from('requisitions')
         .update({
           'status': 'rejected',
-          if (reason.isNotEmpty) 'special_instructions': 'REJECTED: $reason',
+          if (reason.isNotEmpty) 'extra_furniture': 'REJECTED: $reason',
         })
-        .eq('id', eventId);
+        .eq('id', id);
   }
 
-  // ─── AI Clash Detection ────────────────────────────────────────────────
-  // Returns list of clashing approved events for a given pending event
   Future<List<Map<String, dynamic>>> detectClashes(
-    Map<String, dynamic> pendingEvent,
+    Map<String, dynamic> pendingReq,
   ) async {
-    final roomId = pendingEvent['room_id'];
-    final eventDate = pendingEvent['event_date'];
-    final newStart = pendingEvent['start_time'] as int;
-    final newEnd = pendingEvent['end_time'] as int;
-    final pendingId = pendingEvent['id'];
+    final venue = pendingReq['venue'];
+    final pendingId = pendingReq['id'];
+    final pendingSlots =
+        List<Map<String, dynamic>>.from(pendingReq['slots'] ?? []);
 
-    // Fetch all approved events on the same date & room
     final response = await supabase
-        .from('events')
-        .select('*, rooms(room_name)')
-        .eq('room_id', roomId)
-        .eq('event_date', eventDate)
+        .from('requisitions')
+        .select('*')
+        .eq('venue', venue)
         .eq('status', 'approved')
         .neq('id', pendingId);
 
-    final candidates = List<Map<String, dynamic>>.from(response);
+    final approved = List<Map<String, dynamic>>.from(response);
+    final clashes = <Map<String, dynamic>>[];
 
-    // Apply overlap formula: newStart < existEnd AND newEnd > existStart
-    final clashes = candidates.where((e) {
-      final existStart = e['start_time'] as int;
-      final existEnd = e['end_time'] as int;
-      return newStart < existEnd && newEnd > existStart;
-    }).toList();
+    for (final approvedReq in approved) {
+      final approvedSlots =
+          List<Map<String, dynamic>>.from(approvedReq['slots'] ?? []);
+
+      for (final ps in pendingSlots) {
+        for (final as_ in approvedSlots) {
+          if (ps['date'] == as_['date']) {
+            final pStart = _timeToMinutes(ps['from'] ?? '00:00');
+            final pEnd   = _timeToMinutes(ps['to']   ?? '00:00');
+            final aStart = _timeToMinutes(as_['from'] ?? '00:00');
+            final aEnd   = _timeToMinutes(as_['to']   ?? '00:00');
+
+            if (pStart < aEnd && pEnd > aStart) {
+              clashes.add({
+                ...approvedReq,
+                'clash_date': ps['date'],
+                'clash_from': as_['from'],
+                'clash_to':   as_['to'],
+              });
+              break;
+            }
+          }
+        }
+      }
+    }
 
     return clashes;
   }
 
-  // Helper: convert minutes to readable time string
+  static int _timeToMinutes(String time) {
+    try {
+      time = time.trim();
+      bool isPM = time.toUpperCase().contains('PM');
+      bool isAM = time.toUpperCase().contains('AM');
+      time = time.replaceAll(RegExp(r'[APMapm\s]'), '');
+      final parts = time.split(':');
+      int h = int.parse(parts[0]);
+      int m = int.parse(parts[1]);
+      if (isPM && h != 12) h += 12;
+      if (isAM && h == 12) h = 0;
+      return h * 60 + m;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   static String minutesToTime(int minutes) {
     final h = minutes ~/ 60;
     final m = minutes % 60;

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/supabase_auth_service.dart';
-import '../../services/admin_service.dart';
-import '../../services/excel_service.dart';
-import '../../widgets/clash_report_widget.dart';
-import 'package:intl/intl.dart';
+import '../../services/ai_approval_service.dart';
+import '../../widgets/ai_badge.dart';
+import '../../widgets/clash_badge.dart';
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -12,174 +12,217 @@ class AdminHomeScreen extends StatefulWidget {
   State<AdminHomeScreen> createState() => _AdminHomeScreenState();
 }
 
-class _AdminHomeScreenState extends State<AdminHomeScreen>
-    with SingleTickerProviderStateMixin {
+class _AdminHomeScreenState extends State<AdminHomeScreen> {
   final _auth = SupabaseAuthService();
-  final _adminService = AdminService();
-  final _excelService = ExcelService();
-
-  late TabController _tabController;
-
-  Map<String, int> _stats = {'pending': 0, 'approved': 0, 'rejected': 0, 'today': 0};
+  Map<String, dynamic>? _userData;
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _events = [];
   List<Map<String, dynamic>> _pendingEvents = [];
-  List<Map<String, dynamic>> _allEvents = [];
+  List<Map<String, dynamic>> _approvedEvents = [];
+  List<Map<String, dynamic>> _rejectedEvents = [];
 
-  bool _loadingStats = true;
-  bool _loadingPending = true;
-  bool _loadingAll = true;
-  bool _exporting = false;
+  // Filters
+  String _selectedFilter = 'All';
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    _loadAll();
+    _loadData();
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadAll() async {
-    _loadStats();
-    _loadPending();
-    _loadAllEvents();
-  }
-
-  Future<void> _loadStats() async {
-    setState(() => _loadingStats = true);
+  Future<void> _loadData() async {
+    setState(() => _isLoading = true);
     try {
-      final stats = await _adminService.getStats();
-      if (mounted) setState(() => _stats = stats);
-    } catch (e) { _showError('Stats error: $e'); }
-    if (mounted) setState(() => _loadingStats = false);
+      final userId = _auth.currentUserId;
+      if (userId != null) {
+        final supabase = Supabase.instance.client;
+
+        // Load user data
+        final userResponse = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', userId)
+            .maybeSingle();
+        setState(() => _userData = userResponse);
+
+        // Load all events with room details
+        final eventsResponse = await supabase
+            .from('events')
+            .select('*, rooms(*)')
+            .order('created_at', ascending: false);
+
+        _events = List<Map<String, dynamic>>.from(eventsResponse);
+
+        // Filter events
+        _pendingEvents = _events.where((e) => e['status'] == 'pending').toList();
+        _approvedEvents = _events.where((e) => e['status'] == 'approved').toList();
+        _rejectedEvents = _events.where((e) => e['status'] == 'rejected').toList();
+
+        // Check for clashes in pending events
+        await _checkClashes();
+      }
+    } catch (e) {
+      print('Error loading data: $e');
+    }
+    setState(() => _isLoading = false);
   }
 
-  Future<void> _loadPending() async {
-    setState(() => _loadingPending = true);
-    try {
-      final events = await _adminService.getPendingEvents();
-      if (mounted) setState(() => _pendingEvents = events);
-    } catch (e) { _showError('Pending events error: $e'); }
-    if (mounted) setState(() => _loadingPending = false);
-  }
-
-  Future<void> _loadAllEvents() async {
-    setState(() => _loadingAll = true);
-    try {
-      final events = await _adminService.getAllEvents();
-      if (mounted) setState(() => _allEvents = events);
-    } catch (e) { _showError('Events error: $e'); }
-    if (mounted) setState(() => _loadingAll = false);
-  }
-
-  Future<void> _approveEvent(String eventId) async {
-    try {
-      await _adminService.approveEvent(eventId);
-      _showSuccess('Event approved ✅');
-      _loadAll();
-    } catch (e) { _showError('Approve failed: $e'); }
-  }
-
-  Future<void> _rejectEvent(String eventId) async {
-    final reasonController = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Reject Event'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Are you sure you want to reject this event?'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: reasonController,
-              decoration: const InputDecoration(
-                labelText: 'Reason (optional)',
-                border: OutlineInputBorder(),
-                hintText: 'e.g. Room unavailable, date conflict...',
-              ),
-              maxLines: 2,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red,
-                foregroundColor: Colors.white),
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      try {
-        await _adminService.rejectEvent(eventId, reason: reasonController.text.trim());
-        _showSuccess('Event rejected');
-        _loadAll();
-      } catch (e) { _showError('Reject failed: $e'); }
+  Future<void> _checkClashes() async {
+    final supabase = Supabase.instance.client;
+    for (final event in _pendingEvents) {
+      final clashes = await _detectClashes(event);
+      if (clashes.isNotEmpty) {
+        await supabase.from('events').update({
+          'clash_detected': true,
+          'clash_details': clashes,
+        }).eq('id', event['id']);
+      }
     }
   }
 
-  Future<void> _exportExcel() async {
-    setState(() => _exporting = true);
+  Future<List<Map<String, dynamic>>> _detectClashes(Map<String, dynamic> newEvent) async {
+    final supabase = Supabase.instance.client;
+    final clashes = <Map<String, dynamic>>[];
+
     try {
-      await _excelService.exportEventsToExcel();
-      _showSuccess('Excel file downloaded ✅');
-    } catch (e) { _showError('Export failed: $e'); }
-    if (mounted) setState(() => _exporting = false);
+      final approvedEvents = await supabase
+          .from('events')
+          .select('*, rooms(*)')
+          .eq('event_date', newEvent['event_date'])
+          .eq('status', 'approved');
+
+      for (final existing in approvedEvents) {
+        final newStart = newEvent['start_time'] as int;
+        final newEnd = newEvent['end_time'] as int;
+        final existingStart = existing['start_time'] as int;
+        final existingEnd = existing['end_time'] as int;
+
+        // Check if same room and time overlaps
+        if (newEvent['room_id'] == existing['room_id'] &&
+            newStart < existingEnd &&
+            newEnd > existingStart) {
+          clashes.add({
+            'event_id': existing['id'],
+            'event_name': existing['event_name'],
+            'start_time': existingStart,
+            'end_time': existingEnd,
+          });
+        }
+      }
+    } catch (e) {
+      print('Error detecting clashes: $e');
+    }
+
+    return clashes;
   }
 
-  void _showError(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.red),
-    );
+  Future<void> _approveEvent(String eventId, bool isAutoApproved) async {
+    setState(() => _isLoading = true);
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase
+          .from('events')
+          .update({
+            'status': 'approved',
+            'admin_approved_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', eventId);
+
+      // Log activity
+      await supabase.from('activity_logs').insert({
+        'admin_id': _auth.currentUserId,
+        'action': 'approved',
+        'event_id': eventId,
+        'details': isAutoApproved ? 'Auto-approved by AI' : 'Approved by Admin',
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('✅ Event Approved'), backgroundColor: Colors.green),
+      );
+      await _loadData();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+    setState(() => _isLoading = false);
   }
 
-  void _showSuccess(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: Colors.green),
-    );
+  Future<void> _rejectEvent(String eventId) async {
+    setState(() => _isLoading = true);
+    try {
+      final supabase = Supabase.instance.client;
+      await supabase
+          .from('events')
+          .update({
+            'status': 'rejected',
+            'admin_rejected_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', eventId);
+
+      // Log activity
+      await supabase.from('activity_logs').insert({
+        'admin_id': _auth.currentUserId,
+        'action': 'rejected',
+        'event_id': eventId,
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ Event Rejected'), backgroundColor: Colors.red),
+      );
+      await _loadData();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
+    }
+    setState(() => _isLoading = false);
   }
 
-  // ─── Build ──────────────────────────────────────────────────────────────
+  String _formatTime(int minutes) {
+    final hour = minutes ~/ 60;
+    final min = minutes % 60;
+    final period = hour >= 12 ? 'PM' : 'AM';
+    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+    return '$displayHour:${min.toString().padLeft(2, '0')} $period';
+  }
+
+  List<Map<String, dynamic>> get _filteredEvents {
+    var events = _events;
+
+    // Apply status filter
+    if (_selectedFilter != 'All') {
+      events = events.where((e) => e['status'] == _selectedFilter.toLowerCase()).toList();
+    }
+
+    // Apply search filter
+    if (_searchQuery.isNotEmpty) {
+      events = events.where((e) =>
+          (e['event_name'] ?? '').toLowerCase().contains(_searchQuery.toLowerCase()) ||
+          (e['purpose'] ?? '').toLowerCase().contains(_searchQuery.toLowerCase()) ||
+          (e['organization'] ?? '').toLowerCase().contains(_searchQuery.toLowerCase()) ||
+          (e['rooms']?['room_name'] ?? '').toLowerCase().contains(_searchQuery.toLowerCase())
+      ).toList();
+    }
+
+    return events;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final filteredEvents = _filteredEvents;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Admin Dashboard'),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
         actions: [
-          // Export button
-          _exporting
-              ? const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: SizedBox(
-                    width: 20, height: 20,
-                    child: CircularProgressIndicator(
-                        color: Colors.white, strokeWidth: 2),
-                  ),
-                )
-              : IconButton(
-                  icon: const Icon(Icons.download),
-                  tooltip: 'Export to Excel',
-                  onPressed: _exportExcel,
-                ),
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadAll,
+            onPressed: _loadData,
           ),
           IconButton(
             icon: const Icon(Icons.logout),
@@ -190,422 +233,234 @@ class _AdminHomeScreenState extends State<AdminHomeScreen>
             },
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          indicatorColor: Colors.white,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          tabs: [
-            Tab(
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('Pending'),
-                  const SizedBox(width: 6),
-                  if (_stats['pending']! > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Colors.orange,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text('${_stats['pending']}',
-                          style: const TextStyle(fontSize: 11)),
-                    ),
-                ],
-              ),
-            ),
-            const Tab(text: 'All Events'),
-            const Tab(text: 'Stats'),
-          ],
-        ),
       ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          _buildPendingTab(),
-          _buildAllEventsTab(),
-          _buildStatsTab(),
-        ],
-      ),
-    );
-  }
-
-  // ─── Tab 1: Pending ──────────────────────────────────────────────────────
-  Widget _buildPendingTab() {
-    if (_loadingPending) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_pendingEvents.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.inbox, size: 70, color: Colors.grey[300]),
-            const SizedBox(height: 16),
-            Text('No pending requests',
-                style: TextStyle(fontSize: 18, color: Colors.grey[500])),
-            const SizedBox(height: 8),
-            Text('All caught up! ✅',
-                style: TextStyle(color: Colors.grey[400])),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadPending,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _pendingEvents.length,
-        itemBuilder: (context, index) =>
-            _buildPendingCard(_pendingEvents[index]),
-      ),
-    );
-  }
-
-  Widget _buildPendingCard(Map<String, dynamic> event) {
-    final room = event['rooms'] as Map<String, dynamic>?;
-    final user = event['users'] as Map<String, dynamic>?;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 3,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // ── Header row ──
-            Row(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                // Stats Cards
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
                     children: [
-                      Text(
-                        event['event_name'] ?? '',
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        event['organization'] ?? '',
-                        style: TextStyle(color: Colors.blue[700],
-                            fontWeight: FontWeight.w500),
-                      ),
+                      _buildStatCard('Pending', _pendingEvents.length, Colors.orange),
+                      _buildStatCard('Approved', _approvedEvents.length, Colors.green),
+                      _buildStatCard('Rejected', _rejectedEvents.length, Colors.red),
+                      _buildStatCard('Total', _events.length, Colors.blue),
                     ],
                   ),
                 ),
-                // Pending badge
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.orange),
+
+                // Search Bar
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search events...',
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _searchQuery = '');
+                              },
+                            )
+                          : null,
+                    ),
+                    onChanged: (value) => setState(() => _searchQuery = value),
                   ),
-                  child: const Text('PENDING',
-                      style: TextStyle(
-                          color: Colors.orange,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12)),
                 ),
-              ],
-            ),
-            const Divider(height: 20),
 
-            // ── Details grid ──
-            _detailRow(Icons.person, 'Organizer', user?['name'] ?? 'Unknown'),
-            const SizedBox(height: 6),
-            _detailRow(Icons.calendar_today, 'Date', event['event_date'] ?? ''),
-            const SizedBox(height: 6),
-            _detailRow(
-              Icons.access_time,
-              'Time',
-              '${AdminService.minutesToTime(event['start_time'] ?? 0)} → ${AdminService.minutesToTime(event['end_time'] ?? 0)}',
-            ),
-            const SizedBox(height: 6),
-            _detailRow(
-              Icons.meeting_room,
-              'Room',
-              '${room?['room_name'] ?? 'N/A'} — ${room?['building'] ?? ''}',
-            ),
-            const SizedBox(height: 6),
-            _detailRow(
-              Icons.people,
-              'Crowd',
-              '${event['expected_crowd'] ?? 0} people',
-            ),
-
-            if ((event['special_instructions'] ?? '').isNotEmpty) ...[
-              const SizedBox(height: 6),
-              _detailRow(
-                Icons.note,
-                'Notes',
-                event['special_instructions'],
-              ),
-            ],
-
-            const Divider(height: 20),
-
-            // ── AI Clash Detection ──
-            const Row(
-              children: [
-                Icon(Icons.psychology, size: 16, color: Colors.purple),
-                SizedBox(width: 6),
-                Text('AI Clash Report',
-                    style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Colors.purple,
-                        fontSize: 13)),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ClashReportWidget(pendingEvent: event),
-
-            const SizedBox(height: 16),
-
-            // ── Action buttons ──
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _rejectEvent(event['id']),
-                    icon: const Icon(Icons.close, color: Colors.red),
-                    label: const Text('Reject',
-                        style: TextStyle(color: Colors.red)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.red),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                // Filter Chips
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: ['All', 'Pending', 'Approved', 'Rejected'].map((filter) {
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: FilterChip(
+                            label: Text(filter),
+                            selected: _selectedFilter == filter,
+                            onSelected: (selected) {
+                              setState(() => _selectedFilter = selected ? filter : 'All');
+                            },
+                            backgroundColor: Colors.grey.shade200,
+                            selectedColor: Colors.blue.shade100,
+                          ),
+                        );
+                      }).toList(),
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+
+                // Events List
                 Expanded(
-                  flex: 2,
-                  child: ElevatedButton.icon(
-                    onPressed: () => _approveEvent(event['id']),
-                    icon: const Icon(Icons.check),
-                    label: const Text('Approve'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
+                  child: RefreshIndicator(
+                    onRefresh: _loadData,
+                    child: filteredEvents.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.event_busy, size: 60, color: Colors.grey[400]),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No events found',
+                                  style: TextStyle(color: Colors.grey[600]),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: filteredEvents.length,
+                            itemBuilder: (context, index) {
+                              final event = filteredEvents[index];
+                              final roomName = event['rooms']?['room_name'] ?? 'N/A';
+                              final isPending = event['status'] == 'pending';
+                              final isApproved = event['status'] == 'approved';
+                              final isRejected = event['status'] == 'rejected';
+                              final isAutoApproved = event['ai_approved'] == true;
+                              final clashDetected = event['clash_detected'] == true;
+                              final score = event['ai_score'] ?? 0;
+                              final reason = event['ai_reason'] ?? '';
+
+                              return Card(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  side: BorderSide(
+                                    color: isPending ? Colors.orange : 
+                                           isApproved ? Colors.green : 
+                                           Colors.red,
+                                    width: 2,
+                                  ),
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              event['event_name'] ?? 'Untitled',
+                                              style: const TextStyle(
+                                                fontSize: 18,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                          StatusBadge(status: event['status']),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text('📌 $roomName'),
+                                      Text('📅 ${event['event_date']} | 🕐 ${_formatTime(event['start_time'])} - ${_formatTime(event['end_time'])}'),
+                                      Text('👥 ${event['expected_crowd'] ?? 'N/A'}'),
+                                      if (event['purpose'] != null) Text('📝 ${event['purpose']}'),
+                                      const SizedBox(height: 8),
+
+                                      // AI Badge
+                                      Row(
+                                        children: [
+                                          AiBadge(
+                                            isAutoApproved: isAutoApproved,
+                                            score: score,
+                                            reason: reason,
+                                          ),
+                                          if (isPending && clashDetected) ...[
+                                            const SizedBox(width: 8),
+                                            const ClashBadge(),
+                                          ],
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+
+                                      // Action Buttons (only for pending)
+                                      if (isPending) ...[
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: ElevatedButton.icon(
+                                                onPressed: () => _approveEvent(event['id'], isAutoApproved),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.green,
+                                                  foregroundColor: Colors.white,
+                                                ),
+                                                icon: const Icon(Icons.check),
+                                                label: const Text('Approve'),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: ElevatedButton.icon(
+                                                onPressed: () => _rejectEvent(event['id']),
+                                                style: ElevatedButton.styleFrom(
+                                                  backgroundColor: Colors.red,
+                                                  foregroundColor: Colors.white,
+                                                ),
+                                                icon: const Icon(Icons.close),
+                                                label: const Text('Reject'),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        // View Details button
+                                        TextButton(
+                                          onPressed: () {
+                                            // Navigate to event detail
+                                          },
+                                          child: const Text('View Details'),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
                   ),
                 ),
               ],
             ),
-          ],
-        ),
-      ),
     );
   }
 
-  // ─── Tab 2: All Events ───────────────────────────────────────────────────
-  Widget _buildAllEventsTab() {
-    if (_loadingAll) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (_allEvents.isEmpty) {
-      return const Center(child: Text('No events found'));
-    }
-
-    // Group by status
-    final pending = _allEvents.where((e) => e['status'] == 'pending').toList();
-    final approved = _allEvents.where((e) => e['status'] == 'approved').toList();
-    final rejected = _allEvents.where((e) => e['status'] == 'rejected').toList();
-
-    return RefreshIndicator(
-      onRefresh: _loadAllEvents,
-      child: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (approved.isNotEmpty) ...[
-            _sectionHeader('Approved (${approved.length})', Colors.green),
-            ...approved.map((e) => _buildEventTile(e, Colors.green)),
-            const SizedBox(height: 16),
-          ],
-          if (pending.isNotEmpty) ...[
-            _sectionHeader('Pending (${pending.length})', Colors.orange),
-            ...pending.map((e) => _buildEventTile(e, Colors.orange)),
-            const SizedBox(height: 16),
-          ],
-          if (rejected.isNotEmpty) ...[
-            _sectionHeader('Rejected (${rejected.length})', Colors.red),
-            ...rejected.map((e) => _buildEventTile(e, Colors.red)),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _sectionHeader(String title, Color color) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Container(width: 4, height: 20,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(2),
-              )),
-          const SizedBox(width: 8),
-          Text(title,
-              style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: color)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEventTile(Map<String, dynamic> event, Color statusColor) {
-    final room = event['rooms'] as Map<String, dynamic>?;
-    final user = event['users'] as Map<String, dynamic>?;
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 8),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: statusColor.withOpacity(0.3)),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16, vertical: 8),
-        leading: Container(
-          width: 4,
-          decoration: BoxDecoration(
-            color: statusColor,
-            borderRadius: BorderRadius.circular(2),
-          ),
+  Widget _buildStatCard(String label, int count, Color color) {
+    return Expanded(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color),
         ),
-        title: Text(
-          event['event_name'] ?? '',
-          style: const TextStyle(fontWeight: FontWeight.bold),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 4),
-            Text('${user?['name'] ?? ''} • ${event['organization'] ?? ''}',
-                style: const TextStyle(fontSize: 12)),
-            Text(
-              '${event['event_date']} • ${AdminService.minutesToTime(event['start_time'] ?? 0)} → ${AdminService.minutesToTime(event['end_time'] ?? 0)}',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-            Text(
-              '${room?['room_name'] ?? ''}, ${room?['building'] ?? ''}',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-          ],
-        ),
-        trailing: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: statusColor.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: statusColor),
-          ),
-          child: Text(
-            (event['status'] ?? '').toUpperCase(),
-            style: TextStyle(
-                color: statusColor,
-                fontSize: 10,
-                fontWeight: FontWeight.bold),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ─── Tab 3: Stats ────────────────────────────────────────────────────────
-  Widget _buildStatsTab() {
-    return RefreshIndicator(
-      onRefresh: _loadStats,
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Overview',
-                style: TextStyle(
-                    fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-
-            // Stats grid
-            GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 1.5,
-              children: [
-                _statCard('Pending', _stats['pending']!, Colors.orange,
-                    Icons.hourglass_empty),
-                _statCard('Approved', _stats['approved']!, Colors.green,
-                    Icons.check_circle),
-                _statCard('Rejected', _stats['rejected']!, Colors.red,
-                    Icons.cancel),
-                _statCard("Today's Events", _stats['today']!, Colors.blue,
-                    Icons.today),
-              ],
-            ),
-
-            const SizedBox(height: 28),
-
-            // Export button (large)
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _exporting ? null : _exportExcel,
-                icon: _exporting
-                    ? const SizedBox(
-                        width: 18, height: 18,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Icon(Icons.download),
-                label: Text(_exporting
-                    ? 'Exporting...'
-                    : 'Export All Events to Excel'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
+            Text(
+              count.toString(),
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: color,
               ),
             ),
-
-            const SizedBox(height: 16),
-
-            // Total count
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey.shade200),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _miniStat('Total Events',
-                      '${(_stats['pending']! + _stats['approved']! + _stats['rejected']!)}'),
-                  _miniStat('Approval Rate',
-                      _stats['approved']! + _stats['rejected']! > 0
-                          ? '${((_stats['approved']! / (_stats['approved']! + _stats['rejected']!)) * 100).toStringAsFixed(0)}%'
-                          : 'N/A'),
-                ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[700],
               ),
             ),
           ],
@@ -613,73 +468,51 @@ class _AdminHomeScreenState extends State<AdminHomeScreen>
       ),
     );
   }
+}
 
-  Widget _statCard(String label, int count, Color color, IconData icon) {
+/// Status Badge Widget
+class StatusBadge extends StatelessWidget {
+  final String status;
+
+  const StatusBadge({super.key, required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    Color color;
+    String label;
+
+    switch (status) {
+      case 'approved':
+        color = Colors.green;
+        label = '✅ Approved';
+        break;
+      case 'rejected':
+        color = Colors.red;
+        label = '❌ Rejected';
+        break;
+      case 'pending':
+        color = Colors.orange;
+        label = '⏳ Pending';
+        break;
+      default:
+        color = Colors.grey;
+        label = status;
+    }
+
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(12),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 24),
-              const Spacer(),
-              Text(
-                '$count',
-                style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: color),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(label,
-                style: TextStyle(
-                    color: Colors.grey[700],
-                    fontWeight: FontWeight.w500)),
-          ),
-        ],
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
       ),
-    );
-  }
-
-  Widget _miniStat(String label, String value) {
-    return Column(
-      children: [
-        Text(value,
-            style: const TextStyle(
-                fontSize: 24, fontWeight: FontWeight.bold)),
-        Text(label, style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-      ],
-    );
-  }
-
-  // ─── Helpers ────────────────────────────────────────────────────────────
-  Widget _detailRow(IconData icon, String label, String value) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 16, color: Colors.grey[500]),
-        const SizedBox(width: 8),
-        SizedBox(
-          width: 70,
-          child: Text(label,
-              style: TextStyle(color: Colors.grey[600], fontSize: 13)),
-        ),
-        Expanded(
-          child: Text(value,
-              style: const TextStyle(
-                  fontWeight: FontWeight.w500, fontSize: 13)),
-        ),
-      ],
     );
   }
 }
