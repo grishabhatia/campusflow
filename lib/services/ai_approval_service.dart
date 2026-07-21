@@ -1,11 +1,16 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter/foundation.dart';  // ✅ Add this for debugPrint
+import 'package:flutter/foundation.dart';
+import 'gemini_service.dart';
 
-class AiApprovalService {
+class AIApprovalService {
   final supabase = Supabase.instance.client;
+  final GeminiService? _geminiService;
+
+  AIApprovalService({String? geminiApiKey})
+      : _geminiService = geminiApiKey != null ? GeminiService(geminiApiKey) : null;
 
   /// Evaluate event and return approval decision
-  Future<AiDecision> evaluateEvent(Map<String, dynamic> event) async {
+  Future<AiDecision> evaluate(Map<String, dynamic> event) async {
     debugPrint('🔍 Evaluating event: ${event['event_name']}');
 
     // 1. Fetch past approved events
@@ -18,9 +23,35 @@ class AiApprovalService {
 
     debugPrint('📊 Found ${approvedEvents.length} past approved events');
 
-    // 2. If no past events → manual review
+    // 2. If no past events → use Gemini or manual review
     if (approvedEvents.isEmpty) {
-      debugPrint('❌ No past events found → Manual review');
+      if (_geminiService != null) {
+        try {
+          final prompt = '''
+Should this event be approved?
+Event: ${event['purpose'] ?? 'N/A'}
+Date: ${event['event_date'] ?? 'N/A'}
+Time: ${event['start_time'] ?? 'N/A'} - ${event['end_time'] ?? 'N/A'}
+Room: ${event['room_id'] ?? 'N/A'}
+Organization: ${event['organization'] ?? 'N/A'}
+
+Return only one word: 'approve' or 'manual'.
+''';
+          final response = await _geminiService!.generateContent(prompt);
+          final decision = response.trim().toLowerCase();
+
+          if (decision == 'approve') {
+            return AiDecision(
+              autoApproved: true,
+              score: 85,
+              reason: 'AI approved via Gemini',
+            );
+          }
+        } catch (e) {
+          debugPrint('Gemini error: $e');
+        }
+      }
+
       return AiDecision(
         autoApproved: false,
         score: 0,
@@ -42,7 +73,7 @@ class AiApprovalService {
         matches.add('same room');
       }
 
-      // Similar purpose (10 points) — keyword matching
+      // Similar purpose (10 points)
       if (_isPurposeSimilar(pastEvent['purpose'] ?? '', event['purpose'] ?? '')) {
         score += 10;
         matches.add('similar purpose');
@@ -83,7 +114,7 @@ class AiApprovalService {
   }
 
   /// Save decision to database
-  Future<void> persistDecision(String eventId, AiDecision decision) async {
+  Future<void> applyDecision(String eventId, AiDecision decision) async {
     final status = decision.autoApproved ? 'approved' : 'pending';
 
     debugPrint('💾 Saving decision: status=$status, ai_approved=${decision.autoApproved}');
@@ -125,16 +156,6 @@ class AiApprovalService {
     } catch (_) {
       return false;
     }
-  }
-
-  // ✅ ADD THIS METHOD — for create_event_screen.dart
-  Future<AiDecision> evaluate(Map<String, dynamic> event) async {
-    return await evaluateEvent(event);
-  }
-
-  // ✅ ADD THIS METHOD — for applying decision
-  Future<void> applyDecision(String eventId, AiDecision decision) async {
-    await persistDecision(eventId, decision);
   }
 }
 

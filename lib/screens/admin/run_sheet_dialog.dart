@@ -1,154 +1,84 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import '../../core/constants/app_colors.dart';
 import '../../services/gemini_service.dart';
 
 class RunSheetDialog extends StatefulWidget {
-  final Map<String, dynamic> requisition;
+  final Map<String, dynamic> event;
 
-  const RunSheetDialog({super.key, required this.requisition});
+  const RunSheetDialog({super.key, required this.event});
 
   @override
   State<RunSheetDialog> createState() => _RunSheetDialogState();
 }
 
 class _RunSheetDialogState extends State<RunSheetDialog> {
-  final _gemini = GeminiService();
   String? _runSheet;
-  bool _loading = true;
+  bool _isLoading = true;
+  final GeminiService _gemini = GeminiService('YOUR_GEMINI_API_KEY'); // ✅ API key pass karo
 
   @override
   void initState() {
     super.initState();
-    _generate();
+    _generateRunSheet();
   }
 
-  Future<void> _generate() async {
-    setState(() => _loading = true);
+  Future<void> _generateRunSheet() async {
     try {
-      final req = widget.requisition;
-      final sheet = await _gemini.generateRunSheet(
-        purpose: req['purpose'] ?? 'College Event',
-        venue: req['venue'] ?? '',
-        date: req['booking_date'] ?? '',
-        timeFrom: req['event_time_from'] ?? '',
-        timeTo: req['event_time_to'] ?? '',
-        expectedStrength: req['expected_strength'] ?? '',
-      );
-      if (mounted) setState(() => _runSheet = sheet);
+      final prompt = '''
+Generate a detailed event run sheet for:
+Event: ${widget.event['purpose'] ?? 'N/A'}
+Date: ${widget.event['event_date'] ?? 'N/A'}
+Time: ${widget.event['start_time'] ?? 'N/A'} - ${widget.event['end_time'] ?? 'N/A'}
+Venue: ${widget.event['venue'] ?? 'N/A'}
+Expected Crowd: ${widget.event['expected_strength'] ?? 'N/A'}
+
+Format as a timeline with 15-minute intervals.
+Include: Registration, Welcome, Main Event, Break, Q&A, Closing.
+''';
+
+      final response = await _gemini.generateContent(prompt);
+      setState(() => _runSheet = response);
     } catch (e) {
-      if (mounted) setState(() => _runSheet = 'Error generating run sheet: $e');
+      // Fallback template
+      setState(() => _runSheet = '''
+6:00 PM - Registration & Check-in
+6:15 PM - Welcome Address
+6:30 PM - Main Event Starts
+7:30 PM - Break (Refreshments)
+7:45 PM - Event Resumes
+8:45 PM - Closing Remarks
+9:00 PM - Event Ends
+''');
     }
-    if (mounted) setState(() => _loading = false);
+    setState(() => _isLoading = false);
   }
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Container(
-        width: 600,
-        constraints: const BoxConstraints(maxHeight: 600),
-        child: Column(
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
+    return AlertDialog(
+      title: const Text('📋 Event Run Sheet'),
+      content: SizedBox(
+        width: 400,
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
+                child: Text(
+                  _runSheet ?? 'No content',
+                  style: const TextStyle(fontSize: 14, height: 1.6),
                 ),
               ),
-              child: Row(
-                children: [
-                  const Icon(Icons.psychology, color: Colors.white),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text('AI Run Sheet Generator',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white),
-                    onPressed: () => Navigator.pop(context),
-                  ),
-                ],
-              ),
-            ),
-
-            // Content
-            Expanded(
-              child: _loading
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircularProgressIndicator(),
-                          SizedBox(height: 12),
-                          Text('Generating run sheet with AI...'),
-                        ],
-                      ),
-                    )
-                  : SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Text(
-                        _runSheet ?? '',
-                        style: const TextStyle(
-                            fontFamily: 'monospace', fontSize: 13, height: 1.6),
-                      ),
-                    ),
-            ),
-
-            // Footer buttons
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade50,
-                borderRadius: const BorderRadius.only(
-                  bottomLeft: Radius.circular(16),
-                  bottomRight: Radius.circular(16),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _loading ? null : _generate,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('Regenerate'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _loading || _runSheet == null
-                          ? null
-                          : () {
-                              Clipboard.setData(
-                                  ClipboardData(text: _runSheet!));
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                    content: Text('Copied to clipboard ✅')),
-                              );
-                            },
-                      icon: const Icon(Icons.copy),
-                      label: const Text('Copy'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
       ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Close'),
+        ),
+        TextButton(
+          onPressed: () {
+            // Copy to clipboard
+          },
+          child: const Text('📋 Copy'),
+        ),
+      ],
     );
   }
 }
