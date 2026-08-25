@@ -1,11 +1,5 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "build/web/**",
-      "use": "@vercel/static-build"
-    }
-  ],
   "routes": [
     {
       "src": "/assets/(.*)",
@@ -13,7 +7,7 @@
     },
     {
       "src": "/(.*)",
-      "dest": "/index.html"
+      "dest": "/"
     }
   ]
 }
