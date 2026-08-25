@@ -1,91 +1,90 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter/foundation.dart';  // ✅ Add this for debugPrint
+import '../main.dart';
+import '../models/clash_model.dart';
 
 class ClashDetectionService {
-  final supabase = Supabase.instance.client;
-
-  /// Check if event clashes with any approved event
-  Future<ClashResult> checkClash(Map<String, dynamic> newEvent) async {
+  static int _toMin(String time) {
     try {
-      final clashes = <Map<String, dynamic>>[];
-
-      // Fetch all approved events on the same date
-      final approvedEvents = await supabase
-          .from('events')
-          .select('*, rooms(*)')
-          .eq('event_date', newEvent['event_date'])
-          .eq('status', 'approved');
-
-      for (final existing in approvedEvents) {
-        // Skip if it's the same event
-        if (existing['id'] == newEvent['id']) continue;
-
-        final newStart = newEvent['start_time'] as int;
-        final newEnd = newEvent['end_time'] as int;
-        final existingStart = existing['start_time'] as int;
-        final existingEnd = existing['end_time'] as int;
-
-        // Check if same room and time overlaps
-        if (newEvent['room_id'] == existing['room_id'] &&
-            newStart < existingEnd &&
-            newEnd > existingStart) {
-          clashes.add({
-            'event_id': existing['id'],
-            'event_name': existing['event_name'] ?? 'Untitled',
-            'start_time': existingStart,
-            'end_time': existingEnd,
-            'room_name': existing['rooms']?['room_name'] ?? 'N/A',
-          });
-        }
-      }
-
-      // Update event with clash info
-      final hasClash = clashes.isNotEmpty;
-      await supabase.from('events').update({
-        'clash_detected': hasClash,
-        'clash_details': clashes,
-      }).eq('id', newEvent['id']);
-
-      return ClashResult(
-        hasClash: hasClash,
-        clashes: clashes,
-      );
-    } catch (e) {
-      debugPrint('Error checking clash: $e');
-      return ClashResult(hasClash: false, clashes: []);
+      time = time.trim();
+      final isPM = time.toUpperCase().contains('PM');
+      final isAM = time.toUpperCase().contains('AM');
+      time = time.replaceAll(RegExp(r'[APMapm\s]'), '');
+      final parts = time.split(':');
+      int h = int.parse(parts[0]);
+      int m = int.parse(parts[1]);
+      if (isPM && h != 12) h += 12;
+      if (isAM && h == 12) h = 0;
+      return h * 60 + m;
+    } catch (_) {
+      return 0;
     }
   }
 
-  /// Format time from minutes
-  String formatTime(int minutes) {
-    final hour = minutes ~/ 60;
-    final min = minutes % 60;
-    final period = hour >= 12 ? 'PM' : 'AM';
-    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-    return '$displayHour:${min.toString().padLeft(2, '0')} $period';
+  /// Returns list of ClashModel — empty means no clash.
+  Future<List<ClashModel>> checkClashes(
+      Map<String, dynamic> pendingReq) async {
+    final venue     = pendingReq['venue'] as String? ?? '';
+    final pendingId = pendingReq['id']   as String? ?? '';
+    final pendingSlots =
+        List<Map<String, dynamic>>.from(pendingReq['slots'] ?? []);
+
+    // Fetch all approved requisitions for same venue
+    final response = await supabase
+        .from('requisitions')
+        .select('*, users(name)')
+        .eq('venue', venue)
+        .eq('status', 'approved')
+        .neq('id', pendingId);
+
+    final approved = List<Map<String, dynamic>>.from(response);
+    final clashes  = <ClashModel>[];
+
+    for (final approvedReq in approved) {
+      final approvedSlots =
+          List<Map<String, dynamic>>.from(approvedReq['slots'] ?? []);
+
+      for (final ps in pendingSlots) {
+        for (final as_ in approvedSlots) {
+          if (ps['date'] == as_['date']) {
+            final pStart = _toMin(ps['from'] ?? '');
+            final pEnd   = _toMin(ps['to']   ?? '');
+            final aStart = _toMin(as_['from'] ?? '');
+            final aEnd   = _toMin(as_['to']   ?? '');
+
+            if (pStart < aEnd && pEnd > aStart) {
+              clashes.add(ClashModel(
+                clashingEventId:
+                    approvedReq['id'] ?? '',
+                clashingEventName:
+                    approvedReq['purpose'] ?? 'Another Event',
+                venue: venue,
+                date:  ps['date']   ?? '',
+                fromTime: as_['from'] ?? '',
+                toTime:   as_['to']   ?? '',
+                organizerName:
+                    (approvedReq['users']
+                        as Map<String, dynamic>?)?['name'] ??
+                    'Unknown',
+              ));
+              break;
+            }
+          }
+        }
+      }
+    }
+    return clashes;
   }
 
-  /// Check clashes and return list (for create_event_screen.dart)
-  Future<List<Map<String, dynamic>>> checkClashes(Map<String, dynamic> event) async {
-    final result = await checkClash(event);
-    return result.clashes;
+  Future<void> saveClashDetails(
+      String id, List<ClashModel> clashes) async {
+    await supabase.from('requisitions').update({
+      'clash_detected': clashes.isNotEmpty,
+      'clash_details':  clashes.map((c) => c.toMap()).toList(),
+    }).eq('id', id);
   }
 
-  /// Save clash details to database
-  Future<void> saveClashDetails(String eventId, List<Map<String, dynamic>> clashes) async {
-    await supabase
-        .from('events')
-        .update({
-          'clash_detected': clashes.isNotEmpty,
-          'clash_details': clashes,
-        })
-        .eq('id', eventId);
+  Future<void> markNotificationSent(String id) async {
+    await supabase.from('requisitions').update({
+      'clash_notification_sent': true,
+    }).eq('id', id);
   }
-}
-
-class ClashResult {
-  final bool hasClash;
-  final List<Map<String, dynamic>> clashes;
-
-  ClashResult({required this.hasClash, required this.clashes});
 }

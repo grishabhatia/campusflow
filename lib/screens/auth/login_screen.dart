@@ -25,7 +25,7 @@ class _LoginScreenState extends State<LoginScreen> {
             const Icon(Icons.event, size: 80, color: Colors.blue),
             const SizedBox(height: 20),
             const Text(
-              'CampusFlow AI',
+              'CampusFlow Smart',
               style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 40),

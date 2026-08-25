@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../main.dart';
 import '../../models/requisition_model.dart';
+import '../../models/clash_model.dart';
 import '../../services/requisition_service.dart';
 import '../../services/supabase_auth_service.dart';
-import '../../services/ai_approval_service.dart';
-import '../../services/clash_detection_service.dart';
+import '../../services/auto_approval_service.dart';
+import '../../services/email_service.dart';
 import '../../widgets/step_indicator.dart';
-
-// ✅ Global supabase client
-final supabase = Supabase.instance.client;
+import '../../widgets/clash_popup_dialog.dart';
+import '../../widgets/approval_popup_dialog.dart';
 
 class CreateEventScreen extends StatefulWidget {
   const CreateEventScreen({super.key});
@@ -21,8 +21,9 @@ class CreateEventScreen extends StatefulWidget {
 
 class _CreateEventScreenState extends State<CreateEventScreen> {
   final _reqService = RequisitionService();
-  final _auth = SupabaseAuthService();
-  int _currentStep = 0;
+  final _auth       = SupabaseAuthService();
+  final _emailService = EmailService(); // ✅ For clash email
+  int  _currentStep = 0;
   bool _isSubmitting = false;
 
   static const _blue = Color(0xFF1565C0);
@@ -39,75 +40,59 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   ];
 
   // ── Step 2: Booking + Slots ────────────────────────────────────────────────
-  DateTime _bookingDate = DateTime.now().add(const Duration(days: 1));
+  DateTime  _bookingDate = DateTime.now().add(const Duration(days: 1));
   TimeOfDay _bookingTime = const TimeOfDay(hour: 11, minute: 0);
   final List<SlotModel> _slots = [];
 
   // ── Step 3: Event Details ──────────────────────────────────────────────────
-  final _instituteCtrl = TextEditingController(text: 'Manav Rachna University');
-  final _purposeCtrl = TextEditingController();
-  final _strengthCtrl = TextEditingController();
+  final _instituteCtrl = TextEditingController(text: 'Manav Rachna International Institute of Research and Studies');
+  final _purposeCtrl   = TextEditingController();
+  final _strengthCtrl  = TextEditingController();
   TimeOfDay _eventFrom = const TimeOfDay(hour: 10, minute: 0);
-  TimeOfDay _eventTo = const TimeOfDay(hour: 12, minute: 0);
+  TimeOfDay _eventTo   = const TimeOfDay(hour: 12, minute: 0);
 
   // ── Step 4: Facilities ─────────────────────────────────────────────────────
   final FacilityModel _fac = FacilityModel();
 
-  final _lampCntCtrl = TextEditingController(text: '0');
-  final _waterCntCtrl = TextEditingController(text: '0');
+  final _lampCntCtrl    = TextEditingController(text: '0');
+  final _waterCntCtrl   = TextEditingController(text: '0');
   final _bouquetCntCtrl = TextEditingController(text: '0');
-
-  final _photoFromCtrl = TextEditingController();
-  final _photoToCtrl = TextEditingController();
-  final _videoFromCtrl = TextEditingController();
-  final _videoToCtrl = TextEditingController();
-  final _furnitureCtrl = TextEditingController();
+  final _photoFromCtrl  = TextEditingController();
+  final _photoToCtrl    = TextEditingController();
+  final _videoFromCtrl  = TextEditingController();
+  final _videoToCtrl    = TextEditingController();
+  final _furnitureCtrl  = TextEditingController();
 
   // ── Step 5: Signatures ─────────────────────────────────────────────────────
   final SignatureModel _sigs = SignatureModel();
 
   final _initNameCtrl = TextEditingController();
   final _initSignCtrl = TextEditingController();
-  final _initMobCtrl = TextEditingController();
-
-  final _fwdNameCtrl = TextEditingController();
-  final _fwdSignCtrl = TextEditingController();
-  final _fwdMobCtrl = TextEditingController();
-
-  final _recNameCtrl = TextEditingController();
-  final _recSignCtrl = TextEditingController();
-  final _recMobCtrl = TextEditingController();
-
-  final _appNameCtrl = TextEditingController();
-  final _appSignCtrl = TextEditingController();
+  final _initMobCtrl  = TextEditingController();
+  final _fwdNameCtrl  = TextEditingController();
+  final _fwdSignCtrl  = TextEditingController();
+  final _fwdMobCtrl   = TextEditingController();
+  final _recNameCtrl  = TextEditingController();
+  final _recSignCtrl  = TextEditingController();
+  final _recMobCtrl   = TextEditingController();
+  final _appNameCtrl  = TextEditingController();
+  final _appSignCtrl  = TextEditingController();
 
   @override
   void dispose() {
-    _instituteCtrl.dispose();
-    _purposeCtrl.dispose();
-    _strengthCtrl.dispose();
-    _lampCntCtrl.dispose();
-    _waterCntCtrl.dispose();
-    _bouquetCntCtrl.dispose();
-    _photoFromCtrl.dispose();
-    _photoToCtrl.dispose();
-    _videoFromCtrl.dispose();
-    _videoToCtrl.dispose();
+    _instituteCtrl.dispose(); _purposeCtrl.dispose(); _strengthCtrl.dispose();
+    _lampCntCtrl.dispose(); _waterCntCtrl.dispose(); _bouquetCntCtrl.dispose();
+    _photoFromCtrl.dispose(); _photoToCtrl.dispose();
+    _videoFromCtrl.dispose(); _videoToCtrl.dispose();
     _furnitureCtrl.dispose();
-    _initNameCtrl.dispose();
-    _initSignCtrl.dispose();
-    _initMobCtrl.dispose();
-    _fwdNameCtrl.dispose();
-    _fwdSignCtrl.dispose();
-    _fwdMobCtrl.dispose();
-    _recNameCtrl.dispose();
-    _recSignCtrl.dispose();
-    _recMobCtrl.dispose();
-    _appNameCtrl.dispose();
-    _appSignCtrl.dispose();
+    _initNameCtrl.dispose(); _initSignCtrl.dispose(); _initMobCtrl.dispose();
+    _fwdNameCtrl.dispose();  _fwdSignCtrl.dispose();  _fwdMobCtrl.dispose();
+    _recNameCtrl.dispose();  _recSignCtrl.dispose();  _recMobCtrl.dispose();
+    _appNameCtrl.dispose();  _appSignCtrl.dispose();
     super.dispose();
   }
 
+  // ── Helpers ────────────────────────────────────────────────────────────────
   String _timeStr(TimeOfDay t) =>
       '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
@@ -117,6 +102,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     return '${h.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')} $p';
   }
 
+  // ── Validation ─────────────────────────────────────────────────────────────
   bool _validate() {
     switch (_currentStep) {
       case 0:
@@ -124,13 +110,11 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           _err('Please tick your venue choice');
           return false;
         }
-        break;
       case 1:
         if (_slots.isEmpty) {
           _err('Please add at least one Required On slot');
           return false;
         }
-        break;
       case 2:
         if (_purposeCtrl.text.trim().isEmpty) {
           _err('Please enter Purpose');
@@ -140,7 +124,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           _err('Please enter Expected Strength');
           return false;
         }
-        break;
       case 3:
         break;
       case 4:
@@ -148,7 +131,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           _err('Please enter Initiated By name');
           return false;
         }
-        break;
     }
     return true;
   }
@@ -177,73 +159,119 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       final userId = _auth.currentUserId;
       if (userId == null) throw Exception('Not logged in');
 
-      _fac.lampCount = int.tryParse(_lampCntCtrl.text) ?? 0;
-      _fac.waterCount = int.tryParse(_waterCntCtrl.text) ?? 0;
+      // Sync facility controllers into model
+      _fac.lampCount    = int.tryParse(_lampCntCtrl.text)    ?? 0;
+      _fac.waterCount   = int.tryParse(_waterCntCtrl.text)   ?? 0;
       _fac.bouquetCount = int.tryParse(_bouquetCntCtrl.text) ?? 0;
-      _fac.videoFrom = _videoFromCtrl.text.trim();
-      _fac.videoTo = _videoToCtrl.text.trim();
+      _fac.videoFrom    = _videoFromCtrl.text.trim();
+      _fac.videoTo      = _videoToCtrl.text.trim();
 
-      _sigs.initiatedName = _initNameCtrl.text.trim();
-      _sigs.initiatedSign = _initSignCtrl.text.trim();
-      _sigs.initiatedPhone = _initMobCtrl.text.trim();
-      _sigs.forwardedName = _fwdNameCtrl.text.trim();
-      _sigs.forwardedSign = _fwdSignCtrl.text.trim();
+      // Sync signature controllers into model
+      _sigs.initiatedName   = _initNameCtrl.text.trim();
+      _sigs.initiatedSign   = _initSignCtrl.text.trim();
+      _sigs.initiatedPhone  = _initMobCtrl.text.trim();
+      _sigs.forwardedName   = _fwdNameCtrl.text.trim();
+      _sigs.forwardedSign   = _fwdSignCtrl.text.trim();
       _sigs.recommendedName = _recNameCtrl.text.trim();
       _sigs.recommendedSign = _recSignCtrl.text.trim();
-      _sigs.approvedName = _appNameCtrl.text.trim();
-      _sigs.approvedSign = _appSignCtrl.text.trim();
+      _sigs.approvedName    = _appNameCtrl.text.trim();
+      _sigs.approvedSign    = _appSignCtrl.text.trim();
 
       final req = RequisitionModel(
-        userId: userId,
-        venue: _selectedVenue,
-        bookingDate: DateFormat('yyyy-MM-dd').format(_bookingDate),
-        bookingTime: _timeStr(_bookingTime),
-        slots: _slots,
-        instituteName: _instituteCtrl.text.trim(),
-        eventTimeFrom: _timeStr(_eventFrom),
-        eventTimeTo: _timeStr(_eventTo),
-        purpose: _purposeCtrl.text.trim(),
+        userId:           userId,
+        venue:            _selectedVenue,
+        bookingDate:      DateFormat('yyyy-MM-dd').format(_bookingDate),
+        bookingTime:      _timeStr(_bookingTime),
+        slots:            _slots,
+        instituteName:    _instituteCtrl.text.trim(),
+        eventTimeFrom:    _timeStr(_eventFrom),
+        eventTimeTo:      _timeStr(_eventTo),
+        purpose:          _purposeCtrl.text.trim(),
         expectedStrength: _strengthCtrl.text.trim(),
-        facilities: _fac,
-        extraFurniture: _furnitureCtrl.text.trim(),
-        signatures: _sigs,
+        facilities:       _fac,
+        extraFurniture:   _furnitureCtrl.text.trim(),
+        signatures:       _sigs,
       );
 
+      // ── 1. Save to Supabase ──────────────────────────────────────────────
       await _reqService.submitRequisition(req);
 
-      // AI + Clash
-      try {
-        final created = await supabase
-            .from('requisitions')
-            .select('*')
-            .eq('user_id', userId)
-            .order('created_at', ascending: false)
-            .limit(1)
-            .single();
+      // ── 2. Fetch the just-created row ────────────────────────────────────
+      final created = await supabase
+          .from('requisitions')
+          .select('*')
+          .eq('user_id', userId)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .single();
 
-        // ✅ AI Approval
-        final aiSvc = AiApprovalService();
-        final decision = await aiSvc.evaluate(created);
-        await aiSvc.applyDecision(created['id'], decision);
+      // ── 3. Fetch user info for emails ────────────────────────────────────
+      final userRow = await supabase
+          .from('users')
+          .select('name, email')
+          .eq('id', userId)
+          .maybeSingle();
 
-        // ✅ Clash Detection
-        final clashSvc = ClashDetectionService();
-        final clashes = await clashSvc.checkClashes(created);
-        if (clashes.isNotEmpty) {
-          await clashSvc.saveClashDetails(created['id'], clashes);
-        }
-      } catch (e) {
-        debugPrint('AI/Clash error: $e');
-      }
+      final userEmail = userRow?['email'] as String? ?? '';
+      final userName  = userRow?['name']  as String? ?? 'Student';
+
+      // ── 4. Run Auto-Approval (handles clash + emails internally) ─────────
+      final autoApproval = AutoApprovalService();
+      final result = await autoApproval.processRequisition(
+        requisition: created,
+        userEmail:   userEmail,
+        userName:    userName,
+      );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ Requisition submitted successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-      Navigator.pop(context, true);
+
+      final hasClash = result['hasClash'] as bool? ?? false;
+      final clashes = result['clashes'] as List<ClashModel>? ?? [];
+
+      if (hasClash) {
+        // ── 5a. Send Clash Email to Student ──────────────────────────────────
+        await _emailService.sendClashEmail(
+          toEmail: userEmail,
+          userName: userName,
+          eventName: req.purpose,
+          eventDate: req.bookingDate,
+          eventTime: '${req.eventTimeFrom} → ${req.eventTimeTo}',
+          venue: req.venue,
+          clashes: clashes.map((c) => c.toMap()).toList(),
+        );
+
+        // ── 5b. Show Clash Popup ──────────────────────────────────────────────
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => ClashPopupDialog(
+            eventName: req.purpose,
+            roomName: req.venue,
+            eventDate: req.bookingDate,
+            startTime: req.eventTimeFrom,
+            endTime: req.eventTimeTo,
+            clashes: clashes.map((c) => c.toMap()).toList(),
+          ),
+        );
+        if (!mounted) return;
+        Navigator.pop(context, true);
+      } else {
+        // ── Show Approval Popup ────────────────────────────────────────────
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => ApprovalPopupDialog(
+            eventName: req.purpose,
+            venue:     req.venue,
+            date:      req.bookingDate,
+            time:      '${req.eventTimeFrom} → ${req.eventTimeTo}',
+            aiScore:   result['score']  as int?    ?? 0,
+            aiReason:  result['reason'] as String? ?? '',
+          ),
+        );
+        if (!mounted) return;
+        Navigator.pop(context, true);
+      }
     } catch (e) {
       _err('Submit failed: $e');
     }
@@ -252,9 +280,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
 
   // ── Add Slot Dialog ────────────────────────────────────────────────────────
   Future<void> _addSlot() async {
-    DateTime date = DateTime.now().add(const Duration(days: 1));
+    DateTime  date = DateTime.now().add(const Duration(days: 1));
     TimeOfDay from = const TimeOfDay(hour: 10, minute: 0);
-    TimeOfDay to = const TimeOfDay(hour: 12, minute: 0);
+    TimeOfDay to   = const TimeOfDay(hour: 12, minute: 0);
 
     await showDialog(
       context: context,
@@ -286,22 +314,22 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancel')),
             ElevatedButton(
               onPressed: () {
                 setState(() {
                   _slots.add(SlotModel(
                     date: DateFormat('dd/MM/yyyy').format(date),
                     from: _fmt(from),
-                    to: _fmt(to),
+                    to:   _fmt(to),
                   ));
                 });
                 Navigator.pop(ctx);
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: _blue,
-                foregroundColor: Colors.white,
-              ),
+                  backgroundColor: _blue, foregroundColor: Colors.white),
               child: const Text('Add'),
             ),
           ],
@@ -310,17 +338,13 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     );
   }
 
-  Widget _dialogTile(
-    BuildContext ctx,
-    IconData icon,
-    String label,
-    String value,
-    VoidCallback onTap,
-  ) {
+  Widget _dialogTile(BuildContext ctx, IconData icon, String label,
+      String value, VoidCallback onTap) {
     return ListTile(
       leading: Icon(icon, color: _blue),
       title: Text(label, style: const TextStyle(fontSize: 13)),
-      subtitle: Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+      subtitle: Text(value,
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
       onTap: onTap,
     );
   }
@@ -338,6 +362,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       ),
       body: Column(
         children: [
+          // Header banner
           Container(
             width: double.infinity,
             color: _blue,
@@ -345,7 +370,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
             child: Column(
               children: [
                 const Text(
-                  'MANAV RACHNA UNIVERSITY',
+                  'MANAV RACHNA INTERNATIONAL INSTITUTE OF RESEARCH AND STUDIES',
                   style: TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -364,6 +389,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               ],
             ),
           ),
+
+          // Step content
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
@@ -373,6 +400,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               ),
             ),
           ),
+
+          // Bottom buttons
           _bottomButtons(),
         ],
       ),
@@ -381,23 +410,17 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
 
   Widget _buildStep() {
     switch (_currentStep) {
-      case 0:
-        return _step1Venue();
-      case 1:
-        return _step2Booking();
-      case 2:
-        return _step3Details();
-      case 3:
-        return _step4Facilities();
-      case 4:
-        return _step5Signatures();
-      default:
-        return const SizedBox();
+      case 0: return _step1Venue();
+      case 1: return _step2Booking();
+      case 2: return _step3Details();
+      case 3: return _step4Facilities();
+      case 4: return _step5Signatures();
+      default: return const SizedBox();
     }
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STEP 1 — Venue
+  // STEP 1 — Venue Selection
   // ══════════════════════════════════════════════════════════════════════════
   Widget _step1Venue() {
     return _card(
@@ -504,7 +527,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STEP 2 — Booking
+  // STEP 2 — Booking Date/Time + Required On Slots
   // ══════════════════════════════════════════════════════════════════════════
   Widget _step2Booking() {
     return Column(
@@ -687,7 +710,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STEP 4 — Facilities
+  // STEP 4 — Required Facilities
   // ══════════════════════════════════════════════════════════════════════════
   Widget _step4Facilities() {
     return Column(
@@ -800,10 +823,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          Expanded(
-            flex: 2,
-            child: Text(label, style: const TextStyle(fontSize: 14)),
-          ),
+          Expanded(flex: 2, child: Text(label, style: const TextStyle(fontSize: 14))),
           if (trailing != null) ...[
             const SizedBox(width: 8),
             Expanded(flex: 2, child: trailing),
@@ -831,7 +851,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     );
   }
 
-  Widget _timeFromToRow(String label, TextEditingController fromCtrl, TextEditingController toCtrl) {
+  Widget _timeFromToRow(String label, TextEditingController fromCtrl,
+      TextEditingController toCtrl) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(32, 4, 0, 8),
       child: Row(
@@ -869,7 +890,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     );
   }
 
-  Widget _subFacility(String label, bool value, ValueChanged<bool?> onChange) {
+  Widget _subFacility(
+      String label, bool value, ValueChanged<bool?> onChange) {
     return Padding(
       padding: const EdgeInsets.only(left: 32, bottom: 4),
       child: Row(
@@ -906,7 +928,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           nameCtrl: _initNameCtrl,
           signCtrl: _initSignCtrl,
           mobCtrl: _initMobCtrl,
-          mobLabel: 'Mob.:',
         ),
         const SizedBox(height: 12),
         _sigBlock(
@@ -914,7 +935,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           nameCtrl: _fwdNameCtrl,
           signCtrl: _fwdSignCtrl,
           mobCtrl: _fwdMobCtrl,
-          mobLabel: 'Mob.:',
         ),
         const SizedBox(height: 12),
         _sigBlock(
@@ -922,7 +942,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           nameCtrl: _recNameCtrl,
           signCtrl: _recSignCtrl,
           mobCtrl: _recMobCtrl,
-          mobLabel: 'Mob.:',
         ),
         const SizedBox(height: 12),
         _sigBlock(
@@ -975,7 +994,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     required TextEditingController nameCtrl,
     required TextEditingController signCtrl,
     TextEditingController? mobCtrl,
-    String mobLabel = 'Mob.:',
   }) {
     return _card(
       title: title,
@@ -991,7 +1009,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               controller: mobCtrl,
               keyboardType: TextInputType.phone,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: _dec(mobLabel, Icons.phone),
+              decoration: _dec('Mob.:', Icons.phone),
             ),
           ],
         ],
@@ -1006,7 +1024,11 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(0, -2)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
         ],
       ),
       child: Row(
@@ -1040,8 +1062,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                         ? const SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Icon(Icons.send),
                     label: Text(_isSubmitting ? 'Submitting...' : 'Submit Requisition'),
                     style: ElevatedButton.styleFrom(
@@ -1056,7 +1077,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     );
   }
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Reusable card / field widgets ──────────────────────────────────────────
   Widget _card({
     Key? key,
     required String title,
@@ -1073,7 +1094,11 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(0, 2)),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
         ],
       ),
       child: Column(
@@ -1087,8 +1112,11 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _blue)),
-                    if (subtitle != null) Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                    Text(title,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _blue)),
+                    if (subtitle != null)
+                      Text(subtitle,
+                          style: TextStyle(fontSize: 11, color: Colors.grey[600])),
                   ],
                 ),
               ),
@@ -1124,9 +1152,11 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                  Text(label,
+                      style: TextStyle(fontSize: 10, color: Colors.grey[600])),
                   const SizedBox(height: 2),
-                  Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  Text(value,
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),

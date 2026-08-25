@@ -4,6 +4,7 @@ import '../../services/supabase_auth_service.dart';
 import '../../services/ai_approval_service.dart';
 import '../../widgets/ai_badge.dart';
 import '../../widgets/clash_badge.dart';
+import '../../widgets/clash_popup_dialog.dart';  // ✅ Add this import
 
 class AdminHomeScreen extends StatefulWidget {
   const AdminHomeScreen({super.key});
@@ -64,7 +65,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         await _checkClashes();
       }
     } catch (e) {
-      print('Error loading data: $e');
+      debugPrint('Error loading data: $e');
     }
     setState(() => _isLoading = false);
   }
@@ -105,14 +106,14 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             newEnd > existingStart) {
           clashes.add({
             'event_id': existing['id'],
-            'event_name': existing['event_name'],
+            'event_name': existing['event_name'] ?? 'Untitled',
             'start_time': existingStart,
             'end_time': existingEnd,
           });
         }
       }
     } catch (e) {
-      print('Error detecting clashes: $e');
+      debugPrint('Error detecting clashes: $e');
     }
 
     return clashes;

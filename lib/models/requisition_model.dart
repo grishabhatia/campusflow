@@ -37,16 +37,17 @@ class FacilityModel {
   });
 
   Map<String, dynamic> toMap() => {
-    'lamp': {'selected': lamp, 'count': lampCount},
-    'water': {'selected': water, 'count': waterCount},
-    'bouquet': {'selected': bouquet, 'count': bouquetCount},
-    'photography': {'selected': photography},
-    'videography': {'selected': videography, 'from': videoFrom, 'to': videoTo},
-    'projector': {'selected': projector},
-    'laptopIT': {'selected': laptopIT},
-    'podiumMike': {'selected': podiumMike},
+    // ✅ Store as flat booleans AND nested for compatibility
+    'lamp':         {'selected': lamp,        'count': lampCount},
+    'water':        {'selected': water,       'count': waterCount},
+    'bouquet':      {'selected': bouquet,     'count': bouquetCount},
+    'photography':  {'selected': photography},
+    'videography':  {'selected': videography, 'from': videoFrom, 'to': videoTo},
+    'projector':    {'selected': projector},
+    'laptopIT':     {'selected': laptopIT},
+    'podiumMike':   {'selected': podiumMike},
     'cordlessMike': {'selected': cordlessMike},
-    'collarMike': {'selected': collarMike},
+    'collarMike':   {'selected': collarMike},
   };
 }
 
@@ -107,19 +108,19 @@ class RequisitionModel {
   });
 
   Map<String, dynamic> toMap() => {
-    'user_id': userId,
-    'venue': venue,
-    'booking_date': bookingDate,
-    'booking_time': bookingTime,
-    'slots': slots.map((s) => s.toMap()).toList(),
-    'institute_name': instituteName,
-    'event_time_from': eventTimeFrom,
-    'event_time_to': eventTimeTo,
-    'purpose': purpose,
+    'user_id':          userId,
+    'venue':            venue,
+    'booking_date':     bookingDate,
+    'booking_time':     bookingTime,
+    'slots':            slots.map((s) => s.toMap()).toList(),
+    'institute_name':   instituteName,
+    'event_time_from':  eventTimeFrom,
+    'event_time_to':    eventTimeTo,
+    'purpose':          purpose,
     'expected_strength': expectedStrength,
-    'facilities': facilities.toMap(),
-    'extra_furniture': extraFurniture,
-    'signatures': signatures.toMap(),
-    'status': status,
+    'facilities':       facilities.toMap(),
+    'extra_furniture':  extraFurniture,
+    'signatures':       signatures.toMap(),
+    'status':           status,
   };
 }

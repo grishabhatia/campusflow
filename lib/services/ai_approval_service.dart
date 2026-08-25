@@ -1,141 +1,197 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
-import 'gemini_service.dart';
 
 class AIApprovalService {
   final supabase = Supabase.instance.client;
-  final GeminiService? _geminiService;
 
-  AIApprovalService({String? geminiApiKey})
-      : _geminiService = geminiApiKey != null ? GeminiService(geminiApiKey) : null;
+  /// Main method to evaluate event and auto-approve if no clash
+  Future<AIApprovalResult> evaluateAndApprove(Map<String, dynamic> eventData) async {
+    debugPrint('🔍 AI Approval Service started for event: ${eventData['purpose'] ?? 'Untitled'}');
 
-  /// Evaluate event and return approval decision
-  Future<AiDecision> evaluate(Map<String, dynamic> event) async {
-    debugPrint('🔍 Evaluating event: ${event['event_name']}');
+    try {
+      // Step 1: Check for clashes
+      final clashResult = await _checkClashes(eventData);
 
-    // 1. Fetch past approved events
-    final approvedEvents = await supabase
-        .from('events')
-        .select('*')
-        .eq('status', 'approved')
-        .order('created_at', ascending: false)
-        .limit(20);
+      if (clashResult.hasClash) {
+        debugPrint('⚠️ Clash detected! Event will remain pending.');
+        
+        // Update event with clash info
+        await supabase
+            .from('requisitions')
+            .update({
+              'clash_detected': true,
+              'clash_details': clashResult.clashes,
+              'status': 'pending',
+              'ai_approved': false,
+              'ai_reason': 'Clash detected with existing event(s)',
+            })
+            .eq('id', eventData['id']);
 
-    debugPrint('📊 Found ${approvedEvents.length} past approved events');
+        return AIApprovalResult(
+          approved: false,
+          clashDetected: true,
+          clashes: clashResult.clashes,
+          message: '⚠️ Clash detected! Your event clashes with another event on the same date/time/venue.',
+        );
+      }
 
-    // 2. If no past events → use Gemini or manual review
-    if (approvedEvents.isEmpty) {
-      if (_geminiService != null) {
-        try {
-          final prompt = '''
-Should this event be approved?
-Event: ${event['purpose'] ?? 'N/A'}
-Date: ${event['event_date'] ?? 'N/A'}
-Time: ${event['start_time'] ?? 'N/A'} - ${event['end_time'] ?? 'N/A'}
-Room: ${event['room_id'] ?? 'N/A'}
-Organization: ${event['organization'] ?? 'N/A'}
+      // Step 2: No clash → Auto-Approve
+      debugPrint('✅ No clash detected! Auto-approving event.');
+      
+      // Calculate AI score
+      final score = await _calculateScore(eventData);
+      
+      await supabase
+          .from('requisitions')
+          .update({
+            'status': 'approved',
+            'ai_approved': true,
+            'ai_score': score,
+            'ai_reason': 'Auto-approved by AI - No clashes found',
+            'clash_detected': false,
+            'clash_details': [],
+          })
+          .eq('id', eventData['id']);
 
-Return only one word: 'approve' or 'manual'.
-''';
-          final response = await _geminiService!.generateContent(prompt);
-          final decision = response.trim().toLowerCase();
+      return AIApprovalResult(
+        approved: true,
+        clashDetected: false,
+        clashes: [],
+        message: '✅ Your event has been auto-approved by AI!',
+        score: score,
+      );
 
-          if (decision == 'approve') {
-            return AiDecision(
-              autoApproved: true,
-              score: 85,
-              reason: 'AI approved via Gemini',
-            );
-          }
-        } catch (e) {
-          debugPrint('Gemini error: $e');
+    } catch (e) {
+      debugPrint('❌ AI Approval error: $e');
+      return AIApprovalResult(
+        approved: false,
+        clashDetected: false,
+        clashes: [],
+        message: 'Error in AI approval: $e',
+      );
+    }
+  }
+
+  /// Check if event clashes with any approved event
+  Future<ClashResult> _checkClashes(Map<String, dynamic> newEvent) async {
+    try {
+      final clashes = <Map<String, dynamic>>[];
+
+      // Fetch all approved events on the same date
+      final approvedEvents = await supabase
+          .from('requisitions')
+          .select('*')
+          .eq('booking_date', newEvent['booking_date'])
+          .eq('status', 'approved');
+
+      for (final existing in approvedEvents) {
+        // Skip if it's the same event
+        if (existing['id'] == newEvent['id']) continue;
+
+        // Check if same venue
+        if (existing['venue'] != newEvent['venue']) continue;
+
+        // Check if time overlaps
+        final newStart = _timeToMinutes(newEvent['event_time_from'] ?? '00:00');
+        final newEnd = _timeToMinutes(newEvent['event_time_to'] ?? '00:00');
+        final existingStart = _timeToMinutes(existing['event_time_from'] ?? '00:00');
+        final existingEnd = _timeToMinutes(existing['event_time_to'] ?? '00:00');
+
+        if (newStart < existingEnd && newEnd > existingStart) {
+          // Get user name
+          String userName = 'Unknown';
+          try {
+            final userData = await supabase
+                .from('users')
+                .select('name')
+                .eq('id', existing['user_id'])
+                .single();
+            userName = userData['name'] ?? 'Unknown';
+          } catch (_) {}
+
+          clashes.add({
+            'event_id': existing['id'],
+            'event_name': existing['purpose'] ?? 'Untitled',
+            'user_name': userName,
+            'event_time_from': existing['event_time_from'],
+            'event_time_to': existing['event_time_to'],
+          });
         }
       }
 
-      return AiDecision(
-        autoApproved: false,
-        score: 0,
-        reason: 'No past events to compare with. Manual review required.',
+      return ClashResult(
+        hasClash: clashes.isNotEmpty,
+        clashes: clashes,
       );
-    }
 
-    // 3. Calculate score based on past patterns
-    int bestScore = 0;
-    String bestReason = '';
-
-    for (final pastEvent in approvedEvents) {
-      int score = 0;
-      List<String> matches = [];
-
-      // Same room (20 points)
-      if (pastEvent['room_id'] == event['room_id']) {
-        score += 20;
-        matches.add('same room');
-      }
-
-      // Similar purpose (10 points)
-      if (_isPurposeSimilar(pastEvent['purpose'] ?? '', event['purpose'] ?? '')) {
-        score += 10;
-        matches.add('similar purpose');
-      }
-
-      // Same organization (20 points)
-      if (pastEvent['organization'] == event['organization']) {
-        score += 20;
-        matches.add('same organization');
-      }
-
-      // Time within 1 hour (10 points)
-      if (_isTimeWithinOneHour(pastEvent, event)) {
-        score += 10;
-        matches.add('time pattern matches');
-      }
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestReason = 'Matched: ${matches.join(', ')}';
-      }
-    }
-
-    // 🔥 FORCE AUTO-APPROVE FOR TESTING (score >= 0)
-    // Change back to 50 for production
-    final bool autoApprove = bestScore >= 0;
-
-    debugPrint('✅ Score: $bestScore, Auto-Approve: $autoApprove');
-    debugPrint('📝 Reason: $bestReason');
-
-    return AiDecision(
-      autoApproved: autoApprove,
-      score: bestScore,
-      reason: autoApprove
-          ? '✅ Auto-approved by AI: $bestReason (Score: $bestScore)'
-          : 'Manual review needed: score $bestScore < 50',
-    );
-  }
-
-  /// Save decision to database
-  Future<void> applyDecision(String eventId, AiDecision decision) async {
-    final status = decision.autoApproved ? 'approved' : 'pending';
-
-    debugPrint('💾 Saving decision: status=$status, ai_approved=${decision.autoApproved}');
-    debugPrint('💾 Score: ${decision.score}, Reason: ${decision.reason}');
-
-    try {
-      await supabase.from('events').update({
-        'status': status,
-        'ai_approved': decision.autoApproved,
-        'ai_score': decision.score,
-        'ai_reason': decision.reason,
-      }).eq('id', eventId);
-
-      debugPrint('✅ Decision saved successfully!');
     } catch (e) {
-      debugPrint('❌ Error saving decision: $e');
-      rethrow;
+      debugPrint('❌ Clash detection error: $e');
+      return ClashResult(hasClash: false, clashes: []);
     }
   }
 
-  /// Check if purposes are similar (keyword matching)
+  /// Calculate AI score based on past patterns
+  Future<int> _calculateScore(Map<String, dynamic> event) async {
+    try {
+      // Fetch past approved events from same venue
+      final pastEvents = await supabase
+          .from('requisitions')
+          .select('*')
+          .eq('venue', event['venue'])
+          .eq('status', 'approved')
+          .limit(10);
+
+      if (pastEvents.isEmpty) return 80; // Default good score
+
+      int score = 50; // Base score
+
+      // Same venue boost
+      score += 20;
+
+      // Similar purpose boost
+      for (final past in pastEvents) {
+        if (_isPurposeSimilar(past['purpose'] ?? '', event['purpose'] ?? '')) {
+          score += 10;
+          break;
+        }
+      }
+
+      // Same time pattern boost
+      for (final past in pastEvents) {
+        if (_isTimeSimilar(past['event_time_from'] ?? '00:00', event['event_time_from'] ?? '00:00')) {
+          score += 10;
+          break;
+        }
+      }
+
+      // Cap at 100
+      return score > 100 ? 100 : score;
+
+    } catch (e) {
+      debugPrint('❌ Score calculation error: $e');
+      return 70;
+    }
+  }
+
+  /// Convert time string to minutes
+  int _timeToMinutes(String time) {
+    try {
+      time = time.trim();
+      bool isPM = time.toUpperCase().contains('PM');
+      bool isAM = time.toUpperCase().contains('AM');
+      time = time.replaceAll(RegExp(r'[APMapm\s]'), '');
+      final parts = time.split(':');
+      int h = int.parse(parts[0]);
+      int m = int.parse(parts[1]);
+      if (isPM && h != 12) h += 12;
+      if (isAM && h == 12) h = 0;
+      return h * 60 + m;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Check if purposes are similar
   bool _isPurposeSimilar(String purpose1, String purpose2) {
     final words1 = purpose1.toLowerCase().split(RegExp(r'\s+'));
     final words2 = purpose2.toLowerCase().split(RegExp(r'\s+'));
@@ -143,31 +199,60 @@ Return only one word: 'approve' or 'manual'.
     return common >= 2;
   }
 
-  /// Check if time is within 1 hour
-  bool _isTimeWithinOneHour(Map<String, dynamic> past, Map<String, dynamic> current) {
-    try {
-      final pastStart = DateTime.parse(past['event_date']).add(
-        Duration(minutes: past['start_time'] ?? 0),
-      );
-      final currentStart = DateTime.parse(current['event_date']).add(
-        Duration(minutes: current['start_time'] ?? 0),
-      );
-      return pastStart.difference(currentStart).abs().inMinutes <= 60;
-    } catch (_) {
-      return false;
+  /// Check if time is within 30 minutes
+  bool _isTimeSimilar(String time1, String time2) {
+    final t1 = _timeToMinutes(time1);
+    final t2 = _timeToMinutes(time2);
+    return (t1 - t2).abs() <= 30;
+  }
+
+  /// Get clash details for display
+  String getClashMessage(List<Map<String, dynamic>> clashes) {
+    if (clashes.isEmpty) return '';
+    
+    final buffer = StringBuffer();
+    buffer.writeln('⚠️ Clash Detected!');
+    buffer.writeln('Your event clashes with the following event(s):');
+    buffer.writeln();
+    
+    for (var i = 0; i < clashes.length; i++) {
+      final clash = clashes[i];
+      buffer.writeln('${i + 1}. ${clash['event_name'] ?? 'Untitled'}');
+      buffer.writeln('   📅 ${clash['event_time_from']} - ${clash['event_time_to']}');
+      buffer.writeln('   👤 ${clash['user_name'] ?? 'Unknown'}');
+      buffer.writeln();
     }
+    
+    buffer.writeln('💡 Please choose another date, time, or venue.');
+    
+    return buffer.toString();
   }
 }
 
-/// AI Decision Model
-class AiDecision {
-  final bool autoApproved;
-  final int score;
-  final String reason;
+/// AI Approval Result Model
+class AIApprovalResult {
+  final bool approved;
+  final bool clashDetected;
+  final List<Map<String, dynamic>> clashes;
+  final String message;
+  final int? score;
 
-  AiDecision({
-    required this.autoApproved,
-    required this.score,
-    required this.reason,
+  AIApprovalResult({
+    required this.approved,
+    required this.clashDetected,
+    required this.clashes,
+    required this.message,
+    this.score,
+  });
+}
+
+/// Clash Result Model
+class ClashResult {
+  final bool hasClash;
+  final List<Map<String, dynamic>> clashes;
+
+  ClashResult({
+    required this.hasClash,
+    required this.clashes,
   });
 }

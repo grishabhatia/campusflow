@@ -78,7 +78,7 @@ class ClashPopupDialog extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '${clash['event_name']} (${formatTime(clash['start_time'])} - ${formatTime(clash['end_time'])})',
+                      '${clash['event_name'] ?? 'Untitled'} (${_formatTime(clash['start_time'])} - ${_formatTime(clash['end_time'])})',
                       style: const TextStyle(fontSize: 14),
                     ),
                   ),
@@ -101,8 +101,6 @@ class ClashPopupDialog extends StatelessWidget {
         ElevatedButton(
           onPressed: () {
             Navigator.pop(context);
-            // Navigate to clash details
-            Navigator.pushNamed(context, '/clash-details', arguments: clashes);
           },
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.blue,
@@ -114,11 +112,15 @@ class ClashPopupDialog extends StatelessWidget {
     );
   }
 
-  String formatTime(int minutes) {
-    final hour = minutes ~/ 60;
-    final min = minutes % 60;
-    final period = hour >= 12 ? 'PM' : 'AM';
-    final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-    return '$displayHour:${min.toString().padLeft(2, '0')} $period';
+  String _formatTime(dynamic time) {
+    if (time == null) return 'N/A';
+    if (time is int) {
+      final hour = time ~/ 60;
+      final min = time % 60;
+      final period = hour >= 12 ? 'PM' : 'AM';
+      final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+      return '$displayHour:${min.toString().padLeft(2, '0')} $period';
+    }
+    return time.toString();
   }
 }

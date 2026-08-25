@@ -1,6 +1,6 @@
 class AppStrings {
-  static const appName       = 'CampusFlow AI';
-  static const university    = 'Manav Rachna University';
+  static const appName       = 'CampusFlow Smart';
+  static const university    = 'Manav Rachna International Institute of Research and Studies';
   static const tagline       = 'AI-Based Event & Venue Management';
   static const contactPhone  = '+91-8800734239';
   static const contactExtn   = 'Extn. 8217';
