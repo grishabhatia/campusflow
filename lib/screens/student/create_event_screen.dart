@@ -22,7 +22,7 @@ class CreateEventScreen extends StatefulWidget {
 class _CreateEventScreenState extends State<CreateEventScreen> {
   final _reqService = RequisitionService();
   final _auth       = SupabaseAuthService();
-  final _emailService = EmailService(); // ✅ For clash email
+  final _emailService = EmailService();
   int  _currentStep = 0;
   bool _isSubmitting = false;
 
@@ -63,20 +63,12 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   final _videoToCtrl    = TextEditingController();
   final _furnitureCtrl  = TextEditingController();
 
-  // ── Step 5: Signatures ─────────────────────────────────────────────────────
-  final SignatureModel _sigs = SignatureModel();
+  // ── Step 5: Signatures (Only Initiated By) ──────────────────────────────
+  final SignatureModel _sigs = SignatureModel();  // ✅ Added
 
   final _initNameCtrl = TextEditingController();
   final _initSignCtrl = TextEditingController();
   final _initMobCtrl  = TextEditingController();
-  final _fwdNameCtrl  = TextEditingController();
-  final _fwdSignCtrl  = TextEditingController();
-  final _fwdMobCtrl   = TextEditingController();
-  final _recNameCtrl  = TextEditingController();
-  final _recSignCtrl  = TextEditingController();
-  final _recMobCtrl   = TextEditingController();
-  final _appNameCtrl  = TextEditingController();
-  final _appSignCtrl  = TextEditingController();
 
   @override
   void dispose() {
@@ -86,9 +78,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     _videoFromCtrl.dispose(); _videoToCtrl.dispose();
     _furnitureCtrl.dispose();
     _initNameCtrl.dispose(); _initSignCtrl.dispose(); _initMobCtrl.dispose();
-    _fwdNameCtrl.dispose();  _fwdSignCtrl.dispose();  _fwdMobCtrl.dispose();
-    _recNameCtrl.dispose();  _recSignCtrl.dispose();  _recMobCtrl.dispose();
-    _appNameCtrl.dispose();  _appSignCtrl.dispose();
     super.dispose();
   }
 
@@ -170,19 +159,13 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       _sigs.initiatedName   = _initNameCtrl.text.trim();
       _sigs.initiatedSign   = _initSignCtrl.text.trim();
       _sigs.initiatedPhone  = _initMobCtrl.text.trim();
-      _sigs.forwardedName   = _fwdNameCtrl.text.trim();
-      _sigs.forwardedSign   = _fwdSignCtrl.text.trim();
-      _sigs.recommendedName = _recNameCtrl.text.trim();
-      _sigs.recommendedSign = _recSignCtrl.text.trim();
-      _sigs.approvedName    = _appNameCtrl.text.trim();
-      _sigs.approvedSign    = _appSignCtrl.text.trim();
 
       final req = RequisitionModel(
         userId:           userId,
         venue:            _selectedVenue,
         bookingDate:      DateFormat('yyyy-MM-dd').format(_bookingDate),
         bookingTime:      _timeStr(_bookingTime),
-        slots:            _slots,
+        slots:            [], // Empty for now — will update after save
         instituteName:    _instituteCtrl.text.trim(),
         eventTimeFrom:    _timeStr(_eventFrom),
         eventTimeTo:      _timeStr(_eventTo),
@@ -205,7 +188,21 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           .limit(1)
           .single();
 
-      // ── 3. Fetch user info for emails ────────────────────────────────────
+      // ── 3. Update slots with actual event time ──────────────────────────
+      await supabase
+          .from('requisitions')
+          .update({
+            'slots': [
+              {
+                'date': req.bookingDate,
+                'from': req.eventTimeFrom,
+                'to': req.eventTimeTo,
+              }
+            ]
+          })
+          .eq('id', created['id']);
+
+      // ── 4. Fetch user info for emails ────────────────────────────────────
       final userRow = await supabase
           .from('users')
           .select('name, email')
@@ -215,7 +212,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       final userEmail = userRow?['email'] as String? ?? '';
       final userName  = userRow?['name']  as String? ?? 'Student';
 
-      // ── 4. Run Auto-Approval (handles clash + emails internally) ─────────
+      // ── 5. Run Auto-Approval ─────────────────────────────────────────────
       final autoApproval = AutoApprovalService();
       final result = await autoApproval.processRequisition(
         requisition: created,
@@ -226,10 +223,15 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       if (!mounted) return;
 
       final hasClash = result['hasClash'] as bool? ?? false;
-      final clashes = result['clashes'] as List<ClashModel>? ?? [];
+      final clashesRaw = result['clashes'] as List? ?? [];
+
+      // ✅ Convert raw list to ClashModel list
+      final clashes = clashesRaw.map((c) {
+        if (c is ClashModel) return c;
+        return ClashModel.fromMap(c as Map<String, dynamic>);
+      }).toList();
 
       if (hasClash) {
-        // ── 5a. Send Clash Email to Student ──────────────────────────────────
         await _emailService.sendClashEmail(
           toEmail: userEmail,
           userName: userName,
@@ -240,7 +242,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           clashes: clashes.map((c) => c.toMap()).toList(),
         );
 
-        // ── 5b. Show Clash Popup ──────────────────────────────────────────────
         await showDialog(
           context: context,
           barrierDismissible: false,
@@ -256,7 +257,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         if (!mounted) return;
         Navigator.pop(context, true);
       } else {
-        // ── Show Approval Popup ────────────────────────────────────────────
         await showDialog(
           context: context,
           barrierDismissible: false,
@@ -362,7 +362,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       ),
       body: Column(
         children: [
-          // Header banner
           Container(
             width: double.infinity,
             color: _blue,
@@ -389,8 +388,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               ],
             ),
           ),
-
-          // Step content
           Expanded(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(16),
@@ -400,8 +397,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               ),
             ),
           ),
-
-          // Bottom buttons
           _bottomButtons(),
         ],
       ),
@@ -917,7 +912,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STEP 5 — Signatures
+  // STEP 5 — Signatures (Only Initiated By)
   // ══════════════════════════════════════════════════════════════════════════
   Widget _step5Signatures() {
     return Column(
@@ -928,26 +923,6 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           nameCtrl: _initNameCtrl,
           signCtrl: _initSignCtrl,
           mobCtrl: _initMobCtrl,
-        ),
-        const SizedBox(height: 12),
-        _sigBlock(
-          title: 'Forwarded By\n(Admin Office)',
-          nameCtrl: _fwdNameCtrl,
-          signCtrl: _fwdSignCtrl,
-          mobCtrl: _fwdMobCtrl,
-        ),
-        const SizedBox(height: 12),
-        _sigBlock(
-          title: 'Recommended By\n(Dean/Dir.)',
-          nameCtrl: _recNameCtrl,
-          signCtrl: _recSignCtrl,
-          mobCtrl: _recMobCtrl,
-        ),
-        const SizedBox(height: 12),
-        _sigBlock(
-          title: 'Approved By\n(Registrar)',
-          nameCtrl: _appNameCtrl,
-          signCtrl: _appSignCtrl,
         ),
         const SizedBox(height: 16),
         Container(

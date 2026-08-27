@@ -17,23 +17,27 @@ class ClashModel {
     required this.organizerName,
   });
 
-  Map<String, dynamic> toMap() => {
-    'clashing_event_id': clashingEventId,
-    'clashing_event_name': clashingEventName,
-    'venue': venue,
-    'date': date,
-    'from_time': fromTime,
-    'to_time': toTime,
-    'organizer_name': organizerName,
-  };
+  Map<String, dynamic> toMap() {
+    return {
+      'clashingEventId': clashingEventId,
+      'clashingEventName': clashingEventName,
+      'venue': venue,
+      'date': date,
+      'fromTime': fromTime,
+      'toTime': toTime,
+      'organizerName': organizerName,
+    };
+  }
 
-  factory ClashModel.fromMap(Map<String, dynamic> m) => ClashModel(
-    clashingEventId:   m['clashing_event_id'] ?? '',
-    clashingEventName: m['clashing_event_name'] ?? '',
-    venue:             m['venue'] ?? '',
-    date:              m['date'] ?? '',
-    fromTime:          m['from_time'] ?? '',
-    toTime:            m['to_time'] ?? '',
-    organizerName:     m['organizer_name'] ?? '',
-  );
+  factory ClashModel.fromMap(Map<String, dynamic> map) {
+    return ClashModel(
+      clashingEventId: map['clashingEventId'] ?? '',
+      clashingEventName: map['clashingEventName'] ?? 'Another Event',
+      venue: map['venue'] ?? '',
+      date: map['date'] ?? '',
+      fromTime: map['fromTime'] ?? '',
+      toTime: map['toTime'] ?? '',
+      organizerName: map['organizerName'] ?? 'Unknown',
+    );
+  }
 }
