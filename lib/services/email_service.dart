@@ -1,13 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import '../main.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EmailService {
-  // ✅ EmailJS credentials
-  static const _serviceId     = 'service_lutnymb';
-  static const _templateId    = 'template_gu3h19k';
-  static const _publicKey     = 'krVk8P4Wp03tLhl1R';
+ static const _serviceId     = 'service_lutnymb';
+static const _templateId    = 'template_gu3h19k';
+static const _publicKey     = 'krVk8P4Wp03tLhl1R';
   static const _facilityEmail = '0003vaishnavi@gmail.com';
 
   // ── Core send method ──────────────────────────────────────────────────────
@@ -34,7 +33,7 @@ class EmailService {
         }),
       );
 
-      debugPrint('📧 EmailJS: ${res.statusCode} ${res.body}');
+      debugPrint('📧 EmailJS: ${res.statusCode}');
 
       if (res.statusCode == 200) {
         debugPrint('✅ Email sent to $toEmail');
@@ -57,7 +56,8 @@ class EmailService {
     required String body,
   }) async {
     try {
-      await supabase.from('email_queue').insert({
+      // ✅ Direct Supabase client — no global variable
+      await Supabase.instance.client.from('email_queue').insert({
         'to_email':   toEmail,
         'subject':    subject,
         'body':       body,

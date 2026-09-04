@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import '../main.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';  // ✅ Direct import
 import 'clash_detection_service.dart';
 import 'email_service.dart';
 
@@ -94,14 +94,18 @@ class AutoApprovalService {
     final score       = scoreResult['score'] as int;
     final reason      = scoreResult['reason'] as String;
 
-    await supabase.from('requisitions').update({
-      'status':         'approved',
-      'ai_approved':    true,
-      'ai_score':       score,
-      'ai_reason':      reason,
-      'clash_detected': false,
-      'clash_details':  [],
-    }).eq('id', id);
+    // ✅ Direct Supabase client
+    await Supabase.instance.client
+        .from('requisitions')
+        .update({
+          'status':         'approved',
+          'ai_approved':    true,
+          'ai_score':       score,
+          'ai_reason':      reason,
+          'clash_detected': false,
+          'clash_details':  [],
+        })
+        .eq('id', id);
 
     debugPrint('✅ Auto-approved! Score: $score');
 
@@ -136,7 +140,7 @@ class AutoApprovalService {
   Future<Map<String, dynamic>> _score(Map<String, dynamic> req) async {
     try {
       final history = List<Map<String, dynamic>>.from(
-        await supabase
+        await Supabase.instance.client
             .from('requisitions')
             .select('venue, purpose')
             .eq('status', 'approved')

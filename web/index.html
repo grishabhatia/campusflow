@@ -4,21 +4,28 @@
   <base href="/">
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="description" content="CampusFlow Smart — AI-based Event & Venue Management System">
+  
+  <!-- ✅ CSP Headers for Security -->
+  <meta http-equiv="Content-Security-Policy" 
+        content="default-src 'self'; 
+                 script-src 'self' 'unsafe-inline' https://unpkg.com https://cdn.jsdelivr.net https://www.gstatic.com; 
+                 connect-src 'self' https://ovkefbochqbqrtwjfraz.supabase.co; 
+                 style-src 'self' 'unsafe-inline'; 
+                 img-src 'self' data:;">
+  
+  <!-- ✅ Fixed deprecated meta tag -->
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="campusflow">
+  <meta name="apple-mobile-web-app-title" content="CampusFlow Smart">
+  
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
   <link rel="icon" type="image/png" href="favicon.png"/>
-  <title>campusflow</title>
+  <title>CampusFlow Smart</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
-  <!-- 🔥 CRITICAL FIX: Load Passkeys SDK first -->
-  <script src="https://unpkg.com/@corbado/web-js@2.4.0/dist/bundle.js">
-  </script>
-
-  <!-- 🔥 Supabase Web SDK -->
+  <!-- ✅ Supabase SDK for Web -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
   </script>
 

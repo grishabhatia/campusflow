@@ -1,4 +1,4 @@
-import '../main.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';  // ✅ Direct import
 import '../models/clash_model.dart';
 
 class ClashDetectionService {
@@ -25,8 +25,8 @@ class ClashDetectionService {
     final pendingId = pendingReq['id'] as String? ?? '';
     final pendingSlots = List<Map<String, dynamic>>.from(pendingReq['slots'] ?? []);
 
-    // Fetch all approved requisitions for same venue
-    final response = await supabase
+    // ✅ Direct Supabase client
+    final response = await Supabase.instance.client
         .from('requisitions')
         .select('*, users(name)')
         .eq('venue', venue)
@@ -68,15 +68,21 @@ class ClashDetectionService {
   }
 
   Future<void> saveClashDetails(String id, List<ClashModel> clashes) async {
-    await supabase.from('requisitions').update({
-      'clash_detected': clashes.isNotEmpty,
-      'clash_details': clashes.map((c) => c.toMap()).toList(),
-    }).eq('id', id);
+    await Supabase.instance.client
+        .from('requisitions')
+        .update({
+          'clash_detected': clashes.isNotEmpty,
+          'clash_details': clashes.map((c) => c.toMap()).toList(),
+        })
+        .eq('id', id);
   }
 
   Future<void> markNotificationSent(String id) async {
-    await supabase.from('requisitions').update({
-      'clash_notification_sent': true,
-    }).eq('id', id);
+    await Supabase.instance.client
+        .from('requisitions')
+        .update({
+          'clash_notification_sent': true,
+        })
+        .eq('id', id);
   }
 }

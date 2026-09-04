@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import '../../main.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/requisition_model.dart';
 import '../../models/clash_model.dart';
 import '../../services/requisition_service.dart';
@@ -64,7 +64,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   final _furnitureCtrl  = TextEditingController();
 
   // ── Step 5: Signatures (Only Initiated By) ──────────────────────────────
-  final SignatureModel _sigs = SignatureModel();  // ✅ Added
+  final SignatureModel _sigs = SignatureModel();
 
   final _initNameCtrl = TextEditingController();
   final _initSignCtrl = TextEditingController();
@@ -180,7 +180,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       await _reqService.submitRequisition(req);
 
       // ── 2. Fetch the just-created row ────────────────────────────────────
-      final created = await supabase
+      final created = await Supabase.instance.client
           .from('requisitions')
           .select('*')
           .eq('user_id', userId)
@@ -189,7 +189,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           .single();
 
       // ── 3. Update slots with actual event time ──────────────────────────
-      await supabase
+      await Supabase.instance.client
           .from('requisitions')
           .update({
             'slots': [
@@ -203,7 +203,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           .eq('id', created['id']);
 
       // ── 4. Fetch user info for emails ────────────────────────────────────
-      final userRow = await supabase
+      final userRow = await Supabase.instance.client
           .from('users')
           .select('name, email')
           .eq('id', userId)

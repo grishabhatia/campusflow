@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_auth_service.dart';
+import '../student/student_home_screen.dart';
+import '../admin/admin_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -13,6 +15,10 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
   final _auth = SupabaseAuthService();
   bool _isLoading = false;
+
+  // ✅ Rate Limiting Variables
+  int _loginAttempts = 0;
+  DateTime? _blockTime;
 
   @override
   Widget build(BuildContext context) {
@@ -45,7 +51,18 @@ class _LoginScreenState extends State<LoginScreen> {
                 border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton(
+                onPressed: _showForgotPasswordDialog,
+                child: const Text(
+                  'Forgot Password?',
+                  style: TextStyle(color: Colors.blue),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
             _isLoading
                 ? const CircularProgressIndicator()
                 : ElevatedButton(
@@ -55,6 +72,19 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     child: const Text('Login'),
                   ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _signInWithGoogle,
+              icon: const Icon(Icons.g_mobiledata, size: 30, color: Colors.red),
+              label: const Text(
+                'Sign in with Google',
+                style: TextStyle(fontSize: 16),
+              ),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(double.infinity, 50),
+                side: const BorderSide(color: Colors.grey, width: 1.5),
+              ),
+            ),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -73,6 +103,17 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _login() async {
+    // ✅ Rate Limiting Check
+    if (_blockTime != null && DateTime.now().difference(_blockTime!).inMinutes < 5) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Too many attempts. Try again after 5 minutes.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
       await _auth.login(
@@ -81,21 +122,106 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       if (!mounted) return;
 
+      _loginAttempts = 0; // ✅ Reset on success
+
       final userId = _auth.currentUserId;
-      if (userId != null) {
-        final role = await _auth.getUserRole(userId);
-        Navigator.pushReplacementNamed(
-          context,
-          role == 'admin' ? '/admin' : '/student',
-        );
+      if (userId == null) throw Exception('User ID is null');
+
+      await _auth.createUserIfNotExists(
+        userId: userId,
+        email: _emailController.text.trim(),
+        name: 'User',
+      );
+      final role = await _auth.getUserRole(userId);
+
+      if (role == 'admin') {
+        Navigator.pushReplacementNamed(context, '/admin');
+      } else {
+        Navigator.pushReplacementNamed(context, '/student');
       }
     } catch (e) {
-      if (!mounted) return;
+      _loginAttempts++;
+      if (_loginAttempts >= 5) {
+        _blockTime = DateTime.now();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Too many failed attempts. Blocked for 5 minutes.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Login Error: $e')),
+        );
+      }
+    }
+    setState(() => _isLoading = false);
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      await _auth.signInWithGoogle();
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Login Error: $e')),
+        SnackBar(content: Text('Google Sign In Error: $e')),
       );
     }
-    if (mounted) setState(() => _isLoading = false);
+    setState(() => _isLoading = false);
+  }
+
+  void _showForgotPasswordDialog() {
+    final emailController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Reset Password'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Enter your email to receive a password reset link.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: emailController,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              try {
+                await _auth.resetPassword(emailController.text.trim());
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Password reset email sent! Check your inbox.'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Error: $e')),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Send Reset Link'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showRegisterDialog() {
@@ -138,15 +264,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   passwordController.text.trim(),
                   nameController.text.trim(),
                 );
-                if (!context.mounted) return;
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Registration successful! Please login.'),
+                    backgroundColor: Colors.green,
                   ),
                 );
               } catch (e) {
-                if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Register Error: $e')),
                 );

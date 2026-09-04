@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import '../../main.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/requisition_model.dart';
 import '../../services/email_service.dart';
 import '../../services/supabase_auth_service.dart';
@@ -177,20 +177,25 @@ class _EditEventScreenState extends State<EditEventScreen> {
         'bouquet':      {'selected': _bouquet, 'count': int.tryParse(_bouquetCntCtrl.text) ?? 0},
       };
 
-      await supabase.from('requisitions').update({
-        'venue':             _selectedVenue,
-        'purpose':           _purposeCtrl.text.trim(),
-        'expected_strength': _strengthCtrl.text.trim(),
-        'institute_name':    _instituteCtrl.text.trim(),
-        'extra_furniture':   _furnitureCtrl.text.trim(),
-        'booking_date':      DateFormat('yyyy-MM-dd').format(_bookingDate),
-        'event_time_from':   _timeStr(_eventFrom),
-        'event_time_to':     _timeStr(_eventTo),
-        'facilities':        updatedFacilities,
-        'status':            'approved',
-      }).eq('id', reqId);
+      // ✅ Fixed: Supabase.instance.client
+      await Supabase.instance.client
+          .from('requisitions')
+          .update({
+            'venue':             _selectedVenue,
+            'purpose':           _purposeCtrl.text.trim(),
+            'expected_strength': _strengthCtrl.text.trim(),
+            'institute_name':    _instituteCtrl.text.trim(),
+            'extra_furniture':   _furnitureCtrl.text.trim(),
+            'booking_date':      DateFormat('yyyy-MM-dd').format(_bookingDate),
+            'event_time_from':   _timeStr(_eventFrom),
+            'event_time_to':     _timeStr(_eventTo),
+            'facilities':        updatedFacilities,
+            'status':            'approved',
+          })
+          .eq('id', reqId);
 
-      final userRow = await supabase
+      // ✅ Fixed: Supabase.instance.client
+      final userRow = await Supabase.instance.client
           .from('users')
           .select('name, email')
           .eq('id', userId!)
@@ -262,15 +267,14 @@ class _EditEventScreenState extends State<EditEventScreen> {
 
     setState(() => _isSubmitting = true);
     try {
-      // ── 1. Update status to cancelled ──────────────────────────────────────
-      await supabase
+      // ✅ Fixed: Supabase.instance.client
+      await Supabase.instance.client
           .from('requisitions')
           .update({'status': 'cancelled'})
           .eq('id', widget.requisition['id']);
 
-      // ── 2. Fetch user info for emails ─────────────────────────────────────
       final userId = _auth.currentUserId;
-      final userRow = await supabase
+      final userRow = await Supabase.instance.client
           .from('users')
           .select('name, email')
           .eq('id', userId!)
@@ -283,12 +287,10 @@ class _EditEventScreenState extends State<EditEventScreen> {
       final purpose   = widget.requisition['purpose'] ?? 'Untitled';
       final venue     = widget.requisition['venue'] ?? 'N/A';
 
-      // ── 3. Get facilities ──────────────────────────────────────────────────
       final fac = widget.requisition['facilities'] as Map<String, dynamic>? ?? {};
       final photography = _getBool(fac, 'photography');
       final videography = _getBool(fac, 'videography');
 
-      // ── 4. Send cancellation emails ──────────────────────────────────────
       await _emailService.sendCancellationEmail(
         studentEmail: userEmail,
         userName: userName,

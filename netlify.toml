@@ -1,4 +1,10 @@
 [build]
-  command = "git clone https://github.com/flutter/flutter.git -b stable --depth 1 $HOME/flutter && export PATH=\"$PATH:$HOME/flutter/bin\" && flutter build web --release"
   publish = "build/web"
-  
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "geolocation=(), microphone=(), camera=()"
