@@ -20,11 +20,13 @@ class CreateEventScreen extends StatefulWidget {
 }
 
 class _CreateEventScreenState extends State<CreateEventScreen> {
-  final _reqService = RequisitionService();
-  final _auth       = SupabaseAuthService();
+  final _reqService   = RequisitionService();
+  final _auth         = SupabaseAuthService();
   final _emailService = EmailService();
-  int  _currentStep = 0;
+
+  int  _currentStep  = 0;
   bool _isSubmitting = false;
+  bool _submitted    = false;
 
   static const _blue = Color(0xFF1565C0);
 
@@ -45,9 +47,10 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   final List<SlotModel> _slots = [];
 
   // ── Step 3: Event Details ──────────────────────────────────────────────────
-  final _instituteCtrl = TextEditingController(text: 'Manav Rachna International Institute of Research and Studies');
-  final _purposeCtrl   = TextEditingController();
-  final _strengthCtrl  = TextEditingController();
+  final _instituteCtrl = TextEditingController(
+      text: 'Manav Rachna International Institute of Research and Studies');
+  final _purposeCtrl  = TextEditingController();
+  final _strengthCtrl = TextEditingController();
   TimeOfDay _eventFrom = const TimeOfDay(hour: 10, minute: 0);
   TimeOfDay _eventTo   = const TimeOfDay(hour: 12, minute: 0);
 
@@ -63,7 +66,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   final _videoToCtrl    = TextEditingController();
   final _furnitureCtrl  = TextEditingController();
 
-  // ── Step 5: Signatures (Only Initiated By) ──────────────────────────────
+  // ── Step 5: Signatures ─────────────────────────────────────────────────────
   final SignatureModel _sigs = SignatureModel();
 
   final _initNameCtrl = TextEditingController();
@@ -99,11 +102,13 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           _err('Please tick your venue choice');
           return false;
         }
+        break;
       case 1:
         if (_slots.isEmpty) {
           _err('Please add at least one Required On slot');
           return false;
         }
+        break;
       case 2:
         if (_purposeCtrl.text.trim().isEmpty) {
           _err('Please enter Purpose');
@@ -113,6 +118,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           _err('Please enter Expected Strength');
           return false;
         }
+        break;
       case 3:
         break;
       case 4:
@@ -120,6 +126,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           _err('Please enter Initiated By name');
           return false;
         }
+        break;
     }
     return true;
   }
@@ -142,33 +149,49 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   // ── Submit ──────────────────────────────────────────────────────────────────
   Future<void> _submit() async {
     if (!_validate()) return;
+
+    if (_submitted) {
+      debugPrint('⚠️ Already submitted — ignoring duplicate tap');
+      return;
+    }
+    _submitted = true;
     setState(() => _isSubmitting = true);
 
     try {
       final userId = _auth.currentUserId;
       if (userId == null) throw Exception('Not logged in');
 
-      // Sync facility controllers into model
       _fac.lampCount    = int.tryParse(_lampCntCtrl.text)    ?? 0;
       _fac.waterCount   = int.tryParse(_waterCntCtrl.text)   ?? 0;
       _fac.bouquetCount = int.tryParse(_bouquetCntCtrl.text) ?? 0;
       _fac.videoFrom    = _videoFromCtrl.text.trim();
       _fac.videoTo      = _videoToCtrl.text.trim();
 
-      // Sync signature controllers into model
-      _sigs.initiatedName   = _initNameCtrl.text.trim();
-      _sigs.initiatedSign   = _initSignCtrl.text.trim();
-      _sigs.initiatedPhone  = _initMobCtrl.text.trim();
+      _sigs.initiatedName  = _initNameCtrl.text.trim();
+      _sigs.initiatedSign  = _initSignCtrl.text.trim();
+      _sigs.initiatedPhone = _initMobCtrl.text.trim();
+
+      final bookingDateStr = DateFormat('yyyy-MM-dd').format(_bookingDate);
+      final eventTimeFrom  = _timeStr(_eventFrom);
+      final eventTimeTo    = _timeStr(_eventTo);
 
       final req = RequisitionModel(
         userId:           userId,
         venue:            _selectedVenue,
-        bookingDate:      DateFormat('yyyy-MM-dd').format(_bookingDate),
+        bookingDate:      bookingDateStr,
         bookingTime:      _timeStr(_bookingTime),
-        slots:            [], // Empty for now — will update after save
+        slots:            _slots.isNotEmpty
+            ? _slots
+            : [
+                SlotModel(
+                  date: DateFormat('dd/MM/yyyy').format(_bookingDate),
+                  from: _fmt(_eventFrom),
+                  to:   _fmt(_eventTo),
+                )
+              ],
         instituteName:    _instituteCtrl.text.trim(),
-        eventTimeFrom:    _timeStr(_eventFrom),
-        eventTimeTo:      _timeStr(_eventTo),
+        eventTimeFrom:    eventTimeFrom,
+        eventTimeTo:      eventTimeTo,
         purpose:          _purposeCtrl.text.trim(),
         expectedStrength: _strengthCtrl.text.trim(),
         facilities:       _fac,
@@ -176,87 +199,80 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         signatures:       _sigs,
       );
 
-      // ── 1. Save to Supabase ──────────────────────────────────────────────
       await _reqService.submitRequisition(req);
+      await Future.delayed(const Duration(milliseconds: 500));
 
-      // ── 2. Fetch the just-created row ────────────────────────────────────
       final created = await Supabase.instance.client
           .from('requisitions')
           .select('*')
           .eq('user_id', userId)
+          .eq('status', 'pending')
           .order('created_at', ascending: false)
           .limit(1)
           .single();
 
-      // ── 3. Update slots with actual event time ──────────────────────────
-      await Supabase.instance.client
-          .from('requisitions')
-          .update({
-            'slots': [
-              {
-                'date': req.bookingDate,
-                'from': req.eventTimeFrom,
-                'to': req.eventTimeTo,
-              }
-            ]
-          })
-          .eq('id', created['id']);
+      debugPrint('✅ Created ID: ${created['id']}');
 
-      // ── 4. Fetch user info for emails ────────────────────────────────────
-      final userRow = await Supabase.instance.client
-          .from('users')
-          .select('name, email')
-          .eq('id', userId)
-          .maybeSingle();
+      // ── 3. Fetch user info ────────────────────────────────────────────────
+      // ✅ FIXED: Current logged-in user ka email directly lo
+      final userEmail = _auth.currentUser?.email ?? '';
+      final userName  = _auth.currentUser?.userMetadata?['name'] ?? 'Student';
 
-      final userEmail = userRow?['email'] as String? ?? '';
-      final userName  = userRow?['name']  as String? ?? 'Student';
+      debugPrint('📧 Current User Email: $userEmail');
+      debugPrint('👤 User Name: $userName');
 
-      // ── 5. Run Auto-Approval ─────────────────────────────────────────────
+      // ── 4. Auto-Approval + Clash + Emails ────────────────────────────────
       final autoApproval = AutoApprovalService();
       final result = await autoApproval.processRequisition(
         requisition: created,
-        userEmail:   userEmail,
+        userEmail:   userEmail,  // ✅ Current user ka email
         userName:    userName,
       );
 
       if (!mounted) return;
 
-      final hasClash = result['hasClash'] as bool? ?? false;
+      final hasClash  = result['hasClash'] as bool? ?? false;
       final clashesRaw = result['clashes'] as List? ?? [];
 
-      // ✅ Convert raw list to ClashModel list
       final clashes = clashesRaw.map((c) {
         if (c is ClashModel) return c;
         return ClashModel.fromMap(c as Map<String, dynamic>);
       }).toList();
 
       if (hasClash) {
-        await _emailService.sendClashEmail(
-          toEmail: userEmail,
-          userName: userName,
-          eventName: req.purpose,
-          eventDate: req.bookingDate,
-          eventTime: '${req.eventTimeFrom} → ${req.eventTimeTo}',
-          venue: req.venue,
-          clashes: clashes.map((c) => c.toMap()).toList(),
-        );
+        try {
+          await _emailService.sendClashEmail(
+            toEmail:   userEmail,
+            userName:  userName,
+            eventName: req.purpose,
+            eventDate: req.bookingDate,
+            eventTime: '${req.eventTimeFrom} → ${req.eventTimeTo}',
+            venue:     req.venue,
+            clashes:   clashes.map((c) => c.toMap()).toList(),
+          );
+        } catch (e) {
+          debugPrint('⚠️ Clash email error: $e');
+        }
+
+        if (!mounted) return;
 
         await showDialog(
           context: context,
           barrierDismissible: false,
           builder: (_) => ClashPopupDialog(
             eventName: req.purpose,
-            roomName: req.venue,
             eventDate: req.bookingDate,
-            startTime: req.eventTimeFrom,
-            endTime: req.eventTimeTo,
-            clashes: clashes.map((c) => c.toMap()).toList(),
+            startTime: '${req.eventTimeFrom} → ${req.eventTimeTo}',
+            endTime: '${req.eventTimeTo}',
+            roomName:  req.venue,
+            clashes:   clashes.map((c) => c.toMap()).toList(),
           ),
         );
         if (!mounted) return;
         Navigator.pop(context, true);
       } else {
+        if (!mounted) return;
+
         await showDialog(
           context: context,
           barrierDismissible: false,
@@ -273,6 +289,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         Navigator.pop(context, true);
       }
     } catch (e) {
+      _submitted = false;
       _err('Submit failed: $e');
     }
     if (mounted) setState(() => _isSubmitting = false);
@@ -288,7 +305,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
           title: const Text('Add Required On Slot'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -303,12 +321,16 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 );
                 if (p != null) setS(() => date = p);
               }),
-              _dialogTile(ctx, Icons.access_time, 'From', _fmt(from), () async {
-                final p = await showTimePicker(context: ctx, initialTime: from);
+              _dialogTile(ctx, Icons.access_time, 'From', _fmt(from),
+                  () async {
+                final p = await showTimePicker(
+                    context: ctx, initialTime: from);
                 if (p != null) setS(() => from = p);
               }),
-              _dialogTile(ctx, Icons.access_time_filled, 'To', _fmt(to), () async {
-                final p = await showTimePicker(context: ctx, initialTime: to);
+              _dialogTile(ctx, Icons.access_time_filled, 'To', _fmt(to),
+                  () async {
+                final p = await showTimePicker(
+                    context: ctx, initialTime: to);
                 if (p != null) setS(() => to = p);
               }),
             ],
@@ -344,7 +366,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       leading: Icon(icon, color: _blue),
       title: Text(label, style: const TextStyle(fontSize: 13)),
       subtitle: Text(value,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          style: const TextStyle(
+              fontWeight: FontWeight.bold, fontSize: 15)),
       onTap: onTap,
     );
   }
@@ -370,21 +393,26 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               children: [
                 const Text(
                   'MANAV RACHNA INTERNATIONAL INSTITUTE OF RESEARCH AND STUDIES',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white,
-                    fontSize: 16,
+                    fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
+                    letterSpacing: 0.8,
                   ),
                 ),
                 const SizedBox(height: 2),
                 const Text(
                   'REQUISITION FORM FOR EVENTS /\nAUDITORIUM & SEMINAR HALL',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 0.5),
+                  style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      letterSpacing: 0.5),
                 ),
                 const SizedBox(height: 12),
-                StepIndicator(currentStep: _currentStep, totalSteps: 5),
+                StepIndicator(
+                    currentStep: _currentStep, totalSteps: 5),
               ],
             ),
           ),
@@ -415,7 +443,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STEP 1 — Venue Selection
+  // STEP 1 — Venue
   // ══════════════════════════════════════════════════════════════════════════
   Widget _step1Venue() {
     return _card(
@@ -460,12 +488,16 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.check_circle, color: Colors.green, size: 18),
+                  const Icon(Icons.check_circle,
+                      color: Colors.green, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Selected: $_selectedVenue',
-                      style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 13),
+                      style: const TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13),
                     ),
                   ),
                 ],
@@ -495,14 +527,17 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         child: Row(
           children: [
             Container(
-              width: 20,
-              height: 20,
+              width: 20, height: 20,
               decoration: BoxDecoration(
-                border: Border.all(color: selected ? _blue : Colors.grey.shade500, width: 1.5),
+                border: Border.all(
+                    color: selected ? _blue : Colors.grey.shade500,
+                    width: 1.5),
                 borderRadius: BorderRadius.circular(3),
                 color: selected ? _blue : Colors.white,
               ),
-              child: selected ? const Icon(Icons.check, color: Colors.white, size: 14) : null,
+              child: selected
+                  ? const Icon(Icons.check, color: Colors.white, size: 14)
+                  : null,
             ),
             const SizedBox(width: 8),
             Expanded(
@@ -510,7 +545,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 venue,
                 style: TextStyle(
                   fontSize: 13,
-                  fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                  fontWeight:
+                      selected ? FontWeight.bold : FontWeight.normal,
                   color: selected ? _blue : Colors.black87,
                 ),
               ),
@@ -522,7 +558,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STEP 2 — Booking Date/Time + Required On Slots
+  // STEP 2 — Booking
   // ══════════════════════════════════════════════════════════════════════════
   Widget _step2Booking() {
     return Column(
@@ -543,7 +579,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                       context: context,
                       initialDate: _bookingDate,
                       firstDate: DateTime.now(),
-                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                      lastDate: DateTime.now()
+                          .add(const Duration(days: 365)),
                     );
                     if (p != null) setState(() => _bookingDate = p);
                   },
@@ -556,7 +593,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                   value: _fmt(_bookingTime),
                   icon: Icons.access_time,
                   onTap: () async {
-                    final p = await showTimePicker(context: context, initialTime: _bookingTime);
+                    final p = await showTimePicker(
+                        context: context, initialTime: _bookingTime);
                     if (p != null) setState(() => _bookingTime = p);
                   },
                 ),
@@ -581,41 +619,47 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                   ),
                 ),
               ..._slots.asMap().entries.map((e) {
-                final i = e.key;
+                final i    = e.key;
                 final slot = e.value;
                 return Container(
                   margin: const EdgeInsets.only(bottom: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: _blue.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _blue.withValues(alpha: 0.3)),
+                    border:
+                        Border.all(color: _blue.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
                       Container(
-                        width: 24,
-                        height: 24,
-                        decoration: const BoxDecoration(color: _blue, shape: BoxShape.circle),
+                        width: 24, height: 24,
+                        decoration: const BoxDecoration(
+                            color: _blue, shape: BoxShape.circle),
                         child: Center(
-                          child: Text(
-                            '${i + 1}',
-                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
+                          child: Text('${i + 1}',
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold)),
                         ),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           '${slot.date}  (${slot.from} – ${slot.to})',
-                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.close, color: Colors.red, size: 18),
+                        icon: const Icon(Icons.close,
+                            color: Colors.red, size: 18),
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
-                        onPressed: () => setState(() => _slots.removeAt(i)),
+                        onPressed: () =>
+                            setState(() => _slots.removeAt(i)),
                       ),
                     ],
                   ),
@@ -666,14 +710,16 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                   value: _fmt(_eventFrom),
                   icon: Icons.access_time,
                   onTap: () async {
-                    final p = await showTimePicker(context: context, initialTime: _eventFrom);
+                    final p = await showTimePicker(
+                        context: context, initialTime: _eventFrom);
                     if (p != null) setState(() => _eventFrom = p);
                   },
                 ),
               ),
               const Padding(
                 padding: EdgeInsets.symmetric(horizontal: 8),
-                child: Text('To:', style: TextStyle(fontWeight: FontWeight.bold)),
+                child: Text('To:',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
               ),
               Expanded(
                 child: _tapField(
@@ -681,7 +727,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                   value: _fmt(_eventTo),
                   icon: Icons.access_time_filled,
                   onTap: () async {
-                    final p = await showTimePicker(context: context, initialTime: _eventTo);
+                    final p = await showTimePicker(
+                        context: context, initialTime: _eventTo);
                     if (p != null) setState(() => _eventTo = p);
                   },
                 ),
@@ -697,7 +744,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           const SizedBox(height: 14),
           TextField(
             controller: _strengthCtrl,
-            decoration: _dec('Expected Strength: * (e.g. 50-60)', Icons.people),
+            decoration: _dec(
+                'Expected Strength: * (e.g. 50-60)', Icons.people),
           ),
         ],
       ),
@@ -705,7 +753,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STEP 4 — Required Facilities
+  // STEP 4 — Facilities
   // ══════════════════════════════════════════════════════════════════════════
   Widget _step4Facilities() {
     return Column(
@@ -723,7 +771,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 onChanged: (v) => setState(() => _fac.lamp = v!),
                 trailing: _fac.lamp
                     ? _numberField('In Numbers', _lampCntCtrl)
-                    : const Text('In Numbers ___', style: TextStyle(color: Colors.grey)),
+                    : const Text('In Numbers ___',
+                        style: TextStyle(color: Colors.grey)),
               ),
               const Divider(height: 1),
               _facilityRow(
@@ -732,7 +781,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 onChanged: (v) => setState(() => _fac.water = v!),
                 trailing: _fac.water
                     ? _numberField('In Numbers', _waterCntCtrl)
-                    : const Text('In Numbers ___', style: TextStyle(color: Colors.grey)),
+                    : const Text('In Numbers ___',
+                        style: TextStyle(color: Colors.grey)),
               ),
               const Divider(height: 1),
               _facilityRow(
@@ -741,41 +791,59 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 onChanged: (v) => setState(() => _fac.bouquet = v!),
                 trailing: _fac.bouquet
                     ? _numberField('In Numbers', _bouquetCntCtrl)
-                    : const Text('In Numbers ___', style: TextStyle(color: Colors.grey)),
+                    : const Text('In Numbers ___',
+                        style: TextStyle(color: Colors.grey)),
               ),
               const Divider(height: 1),
               _facilityRow(
                 label: 'Still Photography:',
                 checked: _fac.photography,
-                onChanged: (v) => setState(() => _fac.photography = v!),
+                onChanged: (v) =>
+                    setState(() => _fac.photography = v!),
                 trailing: const Text(
                   'MAIL 48 HOURS\nPRIOR TO EVENT',
-                  style: TextStyle(fontSize: 10, color: Colors.orange, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
-              if (_fac.photography) _timeFromToRow('Photography Time:', _photoFromCtrl, _photoToCtrl),
+              if (_fac.photography)
+                _timeFromToRow(
+                    'Photography Time:', _photoFromCtrl, _photoToCtrl),
               const Divider(height: 1),
               _facilityRow(
                 label: 'Videography:',
                 checked: _fac.videography,
-                onChanged: (v) => setState(() => _fac.videography = v!),
+                onChanged: (v) =>
+                    setState(() => _fac.videography = v!),
                 trailing: const Text(
                   'MAIL 48 HOURS\nPRIOR TO EVENT',
-                  style: TextStyle(fontSize: 10, color: Colors.orange, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      fontSize: 10,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
-              if (_fac.videography) _timeFromToRow('Videography Time:', _videoFromCtrl, _videoToCtrl),
+              if (_fac.videography)
+                _timeFromToRow(
+                    'Videography Time:', _videoFromCtrl, _videoToCtrl),
               const Divider(height: 1),
               _facilityRow(
                 label: 'Projector for\nPresentation:',
                 checked: _fac.projector,
-                onChanged: (v) => setState(() => _fac.projector = v!),
+                onChanged: (v) =>
+                    setState(() => _fac.projector = v!),
               ),
               if (_fac.projector) ...[
-                _subFacility('(a) Laptop with IT Person:', _fac.laptopIT, (v) => setState(() => _fac.laptopIT = v!)),
-                _subFacility('(b) Podium Mike:', _fac.podiumMike, (v) => setState(() => _fac.podiumMike = v!)),
-                _subFacility('(c) Cordless Mike:', _fac.cordlessMike, (v) => setState(() => _fac.cordlessMike = v!)),
-                _subFacility('(d) Collar Mike:', _fac.collarMike, (v) => setState(() => _fac.collarMike = v!)),
+                _subFacility('(a) Laptop with IT Person:', _fac.laptopIT,
+                    (v) => setState(() => _fac.laptopIT = v!)),
+                _subFacility('(b) Podium Mike:', _fac.podiumMike,
+                    (v) => setState(() => _fac.podiumMike = v!)),
+                _subFacility('(c) Cordless Mike:', _fac.cordlessMike,
+                    (v) => setState(() => _fac.cordlessMike = v!)),
+                _subFacility('(d) Collar Mike:', _fac.collarMike,
+                    (v) => setState(() => _fac.collarMike = v!)),
               ],
             ],
           ),
@@ -787,7 +855,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           child: TextField(
             controller: _furnitureCtrl,
             maxLines: 2,
-            decoration: _dec('Specify extra furniture', Icons.edit_note),
+            decoration:
+                _dec('Specify extra furniture', Icons.edit_note),
           ),
         ),
       ],
@@ -807,18 +876,24 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           GestureDetector(
             onTap: () => onChanged(!checked),
             child: Container(
-              width: 22,
-              height: 22,
+              width: 22, height: 22,
               decoration: BoxDecoration(
-                border: Border.all(color: checked ? _blue : Colors.grey.shade500, width: 1.5),
+                border: Border.all(
+                    color: checked ? _blue : Colors.grey.shade500,
+                    width: 1.5),
                 borderRadius: BorderRadius.circular(3),
                 color: checked ? _blue : Colors.white,
               ),
-              child: checked ? const Icon(Icons.check, color: Colors.white, size: 15) : null,
+              child: checked
+                  ? const Icon(Icons.check, color: Colors.white, size: 15)
+                  : null,
             ),
           ),
           const SizedBox(width: 10),
-          Expanded(flex: 2, child: Text(label, style: const TextStyle(fontSize: 14))),
+          Expanded(
+              flex: 2,
+              child: Text(label,
+                  style: const TextStyle(fontSize: 14))),
           if (trailing != null) ...[
             const SizedBox(width: 8),
             Expanded(flex: 2, child: trailing),
@@ -838,9 +913,11 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         textAlign: TextAlign.center,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: const TextStyle(fontSize: 11, color: Colors.grey),
+          hintStyle:
+              const TextStyle(fontSize: 11, color: Colors.grey),
           border: const OutlineInputBorder(),
-          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          contentPadding: const EdgeInsets.symmetric(
+              horizontal: 8, vertical: 4),
         ),
       ),
     );
@@ -852,7 +929,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       padding: const EdgeInsets.fromLTRB(32, 4, 0, 8),
       child: Row(
         children: [
-          Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+          Text(label,
+              style:
+                  TextStyle(fontSize: 12, color: Colors.grey[700])),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
@@ -860,7 +939,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               decoration: const InputDecoration(
                 hintText: 'From',
                 border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 6),
               ),
               style: const TextStyle(fontSize: 13),
             ),
@@ -875,7 +955,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
               decoration: const InputDecoration(
                 hintText: 'To',
                 border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                contentPadding: EdgeInsets.symmetric(
+                    horizontal: 8, vertical: 6),
               ),
               style: const TextStyle(fontSize: 13),
             ),
@@ -894,14 +975,17 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           GestureDetector(
             onTap: () => onChange(!value),
             child: Container(
-              width: 20,
-              height: 20,
+              width: 20, height: 20,
               decoration: BoxDecoration(
-                border: Border.all(color: value ? _blue : Colors.grey.shade500),
+                border: Border.all(
+                    color: value ? _blue : Colors.grey.shade500),
                 borderRadius: BorderRadius.circular(3),
                 color: value ? _blue : Colors.white,
               ),
-              child: value ? const Icon(Icons.check, color: Colors.white, size: 13) : null,
+              child: value
+                  ? const Icon(Icons.check,
+                      color: Colors.white, size: 13)
+                  : null,
             ),
           ),
           const SizedBox(width: 8),
@@ -912,7 +996,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // STEP 5 — Signatures (Only Initiated By)
+  // STEP 5 — Signatures
   // ══════════════════════════════════════════════════════════════════════════
   Widget _step5Signatures() {
     return Column(
@@ -922,7 +1006,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           title: 'Initiated By\n(Department) *',
           nameCtrl: _initNameCtrl,
           signCtrl: _initSignCtrl,
-          mobCtrl: _initMobCtrl,
+          mobCtrl:  _initMobCtrl,
         ),
         const SizedBox(height: 16),
         Container(
@@ -935,7 +1019,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
           child: const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('NOTE:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              Text('NOTE:',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 13)),
               SizedBox(height: 6),
               Text(
                 'Use this Requisition form only for Events/Meeting Room Bookings. '
@@ -943,19 +1029,27 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 style: TextStyle(fontSize: 12),
               ),
               SizedBox(height: 6),
-              Text('Please mail the filled form at:', style: TextStyle(fontSize: 12)),
+              Text('Please mail the filled form at:',
+                  style: TextStyle(fontSize: 12)),
               Text(
                 'manager.admin@mrvpl.in',
-                style: TextStyle(fontSize: 12, color: Color(0xFF1565C0), fontWeight: FontWeight.w600),
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF1565C0),
+                    fontWeight: FontWeight.w600),
               ),
               Text(
                 '& CC to virender.events@mriu.edu.in',
-                style: TextStyle(fontSize: 12, color: Color(0xFF1565C0), fontWeight: FontWeight.w600),
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF1565C0),
+                    fontWeight: FontWeight.w600),
               ),
               SizedBox(height: 6),
               Text(
                 'For any assistance please contact:\n+91-8800734239 & Extn. 8217',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(
+                    fontSize: 12, fontWeight: FontWeight.w500),
               ),
             ],
           ),
@@ -975,9 +1069,13 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       icon: Icons.draw,
       child: Column(
         children: [
-          TextField(controller: nameCtrl, decoration: _dec('Name', Icons.person)),
+          TextField(
+              controller: nameCtrl,
+              decoration: _dec('Name', Icons.person)),
           const SizedBox(height: 10),
-          TextField(controller: signCtrl, decoration: _dec('Sign / Designation', Icons.badge)),
+          TextField(
+              controller: signCtrl,
+              decoration: _dec('Sign / Designation', Icons.badge)),
           if (mobCtrl != null) ...[
             const SizedBox(height: 10),
             TextField(
@@ -1014,7 +1112,9 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 onPressed: _prev,
                 icon: const Icon(Icons.arrow_back),
                 label: const Text('Back'),
-                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                style: OutlinedButton.styleFrom(
+                    padding:
+                        const EdgeInsets.symmetric(vertical: 14)),
               ),
             ),
           if (_currentStep > 0) const SizedBox(width: 12),
@@ -1028,22 +1128,27 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _blue,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 14),
                     ),
                   )
                 : ElevatedButton.icon(
                     onPressed: _isSubmitting ? null : _submit,
                     icon: _isSubmitting
                         ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            width: 18, height: 18,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white))
                         : const Icon(Icons.send),
-                    label: Text(_isSubmitting ? 'Submitting...' : 'Submit Requisition'),
+                    label: Text(_isSubmitting
+                        ? 'Submitting...'
+                        : 'Submit Requisition'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.green,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 14),
                     ),
                   ),
           ),
@@ -1052,7 +1157,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     );
   }
 
-  // ── Reusable card / field widgets ──────────────────────────────────────────
+  // ── Reusable Widgets ────────────────────────────────────────────────────────
   Widget _card({
     Key? key,
     required String title,
@@ -1088,10 +1193,15 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(title,
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _blue)),
+                        style: const TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: _blue)),
                     if (subtitle != null)
                       Text(subtitle,
-                          style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.grey[600])),
                   ],
                 ),
               ),
@@ -1128,10 +1238,13 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label,
-                      style: TextStyle(fontSize: 10, color: Colors.grey[600])),
+                      style: TextStyle(
+                          fontSize: 10, color: Colors.grey[600])),
                   const SizedBox(height: 2),
                   Text(value,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -1150,7 +1263,8 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
       focusedBorder: const OutlineInputBorder(
         borderSide: BorderSide(color: _blue, width: 2),
       ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
     );
   }
 }

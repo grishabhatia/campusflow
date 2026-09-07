@@ -177,7 +177,6 @@ class _EditEventScreenState extends State<EditEventScreen> {
         'bouquet':      {'selected': _bouquet, 'count': int.tryParse(_bouquetCntCtrl.text) ?? 0},
       };
 
-      // ✅ Fixed: Supabase.instance.client
       await Supabase.instance.client
           .from('requisitions')
           .update({
@@ -194,17 +193,14 @@ class _EditEventScreenState extends State<EditEventScreen> {
           })
           .eq('id', reqId);
 
-      // ✅ Fixed: Supabase.instance.client
-      final userRow = await Supabase.instance.client
-          .from('users')
-          .select('name, email')
-          .eq('id', userId!)
-          .maybeSingle();
-
-      final userEmail = userRow?['email'] as String? ?? '';
-      final userName  = userRow?['name']  as String? ?? 'Student';
+      // ✅ Current logged-in user ka email directly lo
+      final userEmail = _auth.currentUser?.email ?? '';
+      final userName  = _auth.currentUser?.userMetadata?['name'] ?? 'Student';
       final date      = DateFormat('yyyy-MM-dd').format(_bookingDate);
       final time      = '${_timeStr(_eventFrom)} → ${_timeStr(_eventTo)}';
+
+      debugPrint('📧 Edit - Current Login User Email: $userEmail');
+      debugPrint('👤 Edit - User Name: $userName');
 
       if (_photography || _videography) {
         await _emailService.sendFacilityEmail(
@@ -219,6 +215,7 @@ class _EditEventScreenState extends State<EditEventScreen> {
         );
       }
 
+      // ✅ Approval email with "Event Updated" subject
       await _emailService.sendApprovalEmail(
         toEmail:   userEmail,
         userName:  userName,
@@ -267,21 +264,14 @@ class _EditEventScreenState extends State<EditEventScreen> {
 
     setState(() => _isSubmitting = true);
     try {
-      // ✅ Fixed: Supabase.instance.client
       await Supabase.instance.client
           .from('requisitions')
           .update({'status': 'cancelled'})
           .eq('id', widget.requisition['id']);
 
-      final userId = _auth.currentUserId;
-      final userRow = await Supabase.instance.client
-          .from('users')
-          .select('name, email')
-          .eq('id', userId!)
-          .maybeSingle();
-
-      final userEmail = userRow?['email'] as String? ?? '';
-      final userName  = userRow?['name']  as String? ?? 'Student';
+      // ✅ Current logged-in user ka email directly lo
+      final userEmail = _auth.currentUser?.email ?? '';
+      final userName  = _auth.currentUser?.userMetadata?['name'] ?? 'Student';
       final date      = widget.requisition['booking_date'] ?? 'N/A';
       final time      = '${widget.requisition['event_time_from'] ?? ''} → ${widget.requisition['event_time_to'] ?? ''}';
       final purpose   = widget.requisition['purpose'] ?? 'Untitled';

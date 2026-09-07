@@ -4,67 +4,81 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EmailService {
- static const _serviceId     = 'service_lutnymb';
-static const _templateId    = 'template_gu3h19k';
-static const _publicKey     = 'krVk8P4Wp03tLhl1R';
+  // ✅ SERVICE ID CHECK KARO — EmailJS Dashboard mein konsi service use kar rahe ho?
+  static const _serviceId     = 'service_68vde1j';  // ← YE CHANGE KARO AGAR service_lutnymb HAI TOH
+  static const _templateId    = 'template_gu3h19k';
+  static const _publicKey     = 'krVk8P4Wp03tLhl1R';
   static const _facilityEmail = '0003vaishnavi@gmail.com';
 
-  // ── Core send method ──────────────────────────────────────────────────────
+  // ── Core send method ───────────────────────────────────────────────────────
   Future<bool> _send({
     required String toEmail,
     required String subject,
     required String body,
   }) async {
-    debugPrint('📧 Sending → $toEmail | $subject');
+    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    debugPrint('📧 TO: $toEmail');
+    debugPrint('📧 SUBJECT: $subject');
+    debugPrint('📧 BODY: $body');
 
     try {
+      final payload = jsonEncode({
+        'service_id': _serviceId,
+        'template_id': _templateId,
+        'user_id': _publicKey,
+        'template_params': {
+          'to_email': toEmail,
+          'subject': subject,
+          'message': body,
+          'name': toEmail.split('@')[0],  // ✅ Added for template
+          'time': DateTime.now().toString(),  // ✅ Added for template
+        },
+      });
+
+      debugPrint('📧 Payload: $payload');
+
       final res = await http.post(
         Uri.parse('https://api.emailjs.com/api/v1.0/email/send'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'service_id':  _serviceId,
-          'template_id': _templateId,
-          'user_id':     _publicKey,
-          'template_params': {
-            'to_email': toEmail,
-            'subject':  subject,
-            'message':  body,
-          },
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Origin': 'http://localhost:3000',  // ✅ CORS fix
+        },
+        body: payload,
       );
 
-      debugPrint('📧 EmailJS: ${res.statusCode}');
+      debugPrint('📧 Status: ${res.statusCode}');
+      debugPrint('📧 Response: ${res.body}');
 
       if (res.statusCode == 200) {
-        debugPrint('✅ Email sent to $toEmail');
+        debugPrint('✅ Email SENT to $toEmail');
         return true;
+      } else {
+        debugPrint('❌ EmailJS failed: ${res.statusCode} — ${res.body}');
+        await _queue(toEmail: toEmail, subject: subject, body: body);
+        return false;
       }
-
-      await _queue(toEmail: toEmail, subject: subject, body: body);
-      return true;
     } catch (e) {
-      debugPrint('❌ Error: $e');
+      debugPrint('❌ Email error: $e');
       await _queue(toEmail: toEmail, subject: subject, body: body);
       return false;
     }
   }
 
-  // ── Queue email in Supabase ──────────────────────────────────────────────
+  // ── Queue in Supabase ──────────────────────────────────────────────────────
   Future<void> _queue({
     required String toEmail,
     required String subject,
     required String body,
   }) async {
     try {
-      // ✅ Direct Supabase client — no global variable
       await Supabase.instance.client.from('email_queue').insert({
-        'to_email':   toEmail,
-        'subject':    subject,
-        'body':       body,
-        'sent':       false,
+        'to_email': toEmail,
+        'subject': subject,
+        'body': body,
+        'sent': false,
         'created_at': DateTime.now().toIso8601String(),
       });
-      debugPrint('✅ Queued: $toEmail');
+      debugPrint('✅ Queued email for $toEmail');
     } catch (e) {
       debugPrint('❌ Queue error: $e');
     }
@@ -81,6 +95,9 @@ static const _publicKey     = 'krVk8P4Wp03tLhl1R';
     required String userName,
     required String userEmail,
   }) async {
+    debugPrint('📸 sendFacilityEmail called');
+    debugPrint('   photography=$photography videography=$videography');
+
     final facility = [
       if (photography) 'Still Photography',
       if (videography) 'Videography',
@@ -88,17 +105,21 @@ static const _publicKey     = 'krVk8P4Wp03tLhl1R';
 
     await _send(
       toEmail: _facilityEmail,
-      subject: '📸 $facility Request — $eventName',
+      subject: '📸 Facility Request: $facility — $eventName',
       body: '''
 Hello Facilities Team,
 
 A new event requires $facility arrangements.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EVENT DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Event    : $eventName
 Date     : $eventDate
 Time     : $eventTime
-Venue    : $venue, Manav Rachna 
+Venue    : $venue, Manav Rachna University
 Facility : $facility
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Requested By : $userName ($userEmail)
 
@@ -118,21 +139,28 @@ CampusFlow AI — +91-8800734239 | Extn. 8217
     required String eventTime,
     required String venue,
   }) async {
+    debugPrint('✅ sendApprovalEmail called → $toEmail');
+
     await _send(
       toEmail: toEmail,
       subject: '🎉 Your Event Request has been Approved!',
       body: '''
 Dear $userName,
 
-Your event request has been approved!
+Your event request has been approved! 🎉
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EVENT DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Event : $eventName
 Date  : $eventDate
 Time  : $eventTime
 Venue : $venue, Manav Rachna University
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Contact : +91-8800734239 | Extn. 8217
-Email   : manager.admin@mrvpl.in
+For assistance, please contact:
+📞 +91-8800734239 | Extn. 8217
+📧 manager.admin@mrvpl.in
 
 CampusFlow Smart Team
 Manav Rachna International Institute of Research and Studies
@@ -156,13 +184,19 @@ Dear $userName,
 
 Your event request was not approved.
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EVENT DETAILS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Event  : $eventName
 Venue  : $venue
 ${reason.isNotEmpty ? 'Reason : $reason' : ''}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Submit a new request with different time/venue.
+Please submit a new request with a different time or venue.
 
-Contact : +91-8800734239 | Extn. 8217
+📞 +91-8800734239 | Extn. 8217
+📧 manager.admin@mrvpl.in
+
 CampusFlow AI Team
 ''',
     );
@@ -179,45 +213,45 @@ CampusFlow AI Team
     required bool photography,
     required bool videography,
   }) async {
-    // To Student
+    // To student
     await _send(
       toEmail: studentEmail,
-      subject: '❌ Your Event has been Cancelled',
+      subject: '❌ Your Event has been Cancelled — $eventName',
       body: '''
 Dear $userName,
 
-Your event has been cancelled successfully.
+Your event has been cancelled.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EVENT DETAILS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📌 Event : $eventName
-📅 Date  : $eventDate
-🕐 Time  : $eventTime
-📍 Venue : $venue
+Event : $eventName
+Date  : $eventDate
+Time  : $eventTime
+Venue : $venue
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 If this was a mistake, please contact the admin office.
 
-Contact : +91-8800734239 | Extn. 8217
-Email   : manager.admin@mrvpl.in
+📞 +91-8800734239 | Extn. 8217
+📧 manager.admin@mrvpl.in
 
-Thank you,
 CampusFlow AI Team
 ''',
     );
 
-    // To Facilities Team
+    // To facility team
     final facility = [
       if (photography) 'Still Photography',
       if (videography) 'Videography',
     ].join(' & ');
 
-    await _send(
-      toEmail: _facilityEmail,
-      subject: '❌ Event Cancelled — $eventName',
-      body: '''
-Hello,
+    if (facility.isNotEmpty) {
+      await _send(
+        toEmail: _facilityEmail,
+        subject: '❌ Event Cancelled — $eventName',
+        body: '''
+Hello Facilities Team,
 
 The following event has been CANCELLED.
 
@@ -228,18 +262,19 @@ Event    : $eventName
 Date     : $eventDate
 Time     : $eventTime
 Venue    : $venue
-Facility : ${facility.isNotEmpty ? facility : 'None'}
+Facility : $facility
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Please note: The facilities are no longer required for this event.
+Facilities are no longer required.
 
 CampusFlow AI — Manav Rachna University
-Contact: +91-8800734239 | Extn. 8217
+📞 +91-8800734239 | Extn. 8217
 ''',
-    );
+      );
+    }
   }
 
-  // ── EMAIL 5: Clash Detection Email ──────────────────────────────────────
+  // ── EMAIL 5: Clash Email ─────────────────────────────────────────────────
   Future<void> sendClashEmail({
     required String toEmail,
     required String userName,
@@ -250,12 +285,12 @@ Contact: +91-8800734239 | Extn. 8217
     required List<Map<String, dynamic>> clashes,
   }) async {
     String clashDetails = '';
-    for (var i = 0; i < clashes.length; i++) {
-      final clash = clashes[i];
+    for (int i = 0; i < clashes.length; i++) {
+      final c = clashes[i];
       clashDetails += '''
-${i + 1}. ${clash['clashingEventName'] ?? clash['event_name'] ?? 'Untitled'}
-   🕐 ${clash['fromTime'] ?? clash['from_time'] ?? 'N/A'} - ${clash['toTime'] ?? clash['to_time'] ?? 'N/A'}
-   👤 ${clash['organizerName'] ?? 'Unknown'}
+${i + 1}. ${c['event_name'] ?? c['clashingEventName'] ?? 'Untitled Event'}
+   🕐 ${c['time_from'] ?? c['fromTime'] ?? 'N/A'} → ${c['time_to'] ?? c['toTime'] ?? 'N/A'}
+   👤 ${c['organizerName'] ?? 'Unknown'}
 
 ''';
     }
@@ -276,16 +311,18 @@ YOUR EVENT DETAILS
 🕐 Time  : $eventTime
 📍 Venue : $venue
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 CLASHES FOUND
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 $clashDetails
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 💡 Please choose another date, time, or venue.
 
-For assistance, please contact:
+For assistance:
 📞 +91-8800734239 | Extn. 8217
 📧 manager.admin@mrvpl.in
 
-Thank you,
 CampusFlow AI Team
 ''',
     );

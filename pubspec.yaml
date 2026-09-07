@@ -21,6 +21,7 @@ dependencies:
   fl_chart: ^0.68.0
   shared_preferences: ^2.3.0
   url_launcher: ^6.3.0
+  emailjs: ^4.0.0  # ✅ ADD THIS
 
 dev_dependencies:
   flutter_test:

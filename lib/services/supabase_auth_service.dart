@@ -4,6 +4,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 class SupabaseAuthService {
   SupabaseClient get supabase => Supabase.instance.client;
 
+  // ── Current User Getters ──────────────────────────────────────────────────
+  User? get currentUser => supabase.auth.currentUser;
+  String? get currentUserId => supabase.auth.currentUser?.id;
+  String? get currentUserEmail => supabase.auth.currentUser?.email;
+
   // ── Email/Password Login ───────────────────────────────────────────────────
   Future<void> login(String email, String password) async {
     await supabase.auth.signInWithPassword(
@@ -22,12 +27,12 @@ class SupabaseAuthService {
 
     if (response.user != null) {
       await supabase.from('users').insert({
-        'id': response.user!.id,
-        'email': email,
-        'name': name,
-        'role': 'student',
+        'id':           response.user!.id,
+        'email':        email,
+        'name':         name,
+        'role':         'student',
         'organization': '',
-        'created_at': DateTime.now().toIso8601String(),
+        'created_at':   DateTime.now().toIso8601String(),
       });
     } else {
       throw Exception('Registration failed: User not created');
@@ -39,7 +44,7 @@ class SupabaseAuthService {
     try {
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: 'https://stupendous-selkie-756c5b.netlify.app',
+        redirectTo: 'http://localhost:3000',
       );
     } catch (e) {
       debugPrint('❌ Google Sign In error: $e');
@@ -63,23 +68,29 @@ class SupabaseAuthService {
     await supabase.auth.signOut();
   }
 
-  // ── Current User ID ────────────────────────────────────────────────────────
-  String? get currentUserId => supabase.auth.currentUser?.id;
-
-  // ── Current User Email ─────────────────────────────────────────────────────
-  String? get currentUserEmail => supabase.auth.currentUser?.email;
-
   // ── Get User Role ──────────────────────────────────────────────────────────
   Future<String> getUserRole(String userId) async {
     try {
+      debugPrint('🔍 Getting role for userId: $userId');
+
       final response = await supabase
           .from('users')
-          .select('role')
+          .select('role, email')
           .eq('id', userId)
           .maybeSingle();
-      return response?['role'] ?? 'student';
+
+      debugPrint('📋 User record: $response');
+
+      if (response == null) {
+        debugPrint('⚠️ User not found in DB for id: $userId');
+        return 'student';
+      }
+
+      final role = response['role'] as String? ?? 'student';
+      debugPrint('👤 Role: $role | Email: ${response['email']}');
+      return role;
     } catch (e) {
-      debugPrint('getUserRole error: $e');
+      debugPrint('❌ getUserRole error: $e');
       return 'student';
     }
   }
@@ -92,40 +103,44 @@ class SupabaseAuthService {
   }) async {
     try {
       final user = supabase.auth.currentUser;
-      final uid = userId ?? user?.id;
+      final uid  = userId ?? user?.id;
       if (uid == null) return;
 
       final existing = await supabase
           .from('users')
-          .select('id')
+          .select('id, role')
           .eq('id', uid)
           .maybeSingle();
 
+      debugPrint('📋 Existing user check: $existing');
+
       if (existing == null) {
-        final resolvedName = name ??
-            user?.userMetadata?['full_name'] ??
-            user?.userMetadata?['name'] ??
-            email?.split('@')[0] ??
-            'Student';
+        final resolvedName = name
+            ?? user?.userMetadata?['full_name']
+            ?? user?.userMetadata?['name']
+            ?? email?.split('@')[0]
+            ?? 'User';  // ✅ YAHAN CHANGE — 'Student' → 'User'
 
         final resolvedEmail = email ?? user?.email ?? '';
 
         await supabase.from('users').insert({
-          'id': uid,
-          'email': resolvedEmail,
-          'name': resolvedName,
-          'role': 'student',
+          'id':           uid,
+          'email':        resolvedEmail,
+          'name':         resolvedName,
+          'role':         'student',
           'organization': '',
-          'created_at': DateTime.now().toIso8601String(),
+          'created_at':   DateTime.now().toIso8601String(),
         });
-        debugPrint('✅ New user created in DB: $resolvedName');
+        debugPrint('✅ New Google user created: $resolvedName ($resolvedEmail)');
+      } else {
+        debugPrint('✅ User already exists — role: ${existing['role']}');
       }
     } catch (e) {
-      debugPrint('createUserIfNotExists error: $e');
+      debugPrint('❌ createUserIfNotExists error: $e');
     }
   }
 
-  // ── Listen to auth state changes ───────────────────────────────────────────
+  // ── Auth State Changes ─────────────────────────────────────────────────────
   Stream<AuthState> get authStateChanges =>
       supabase.auth.onAuthStateChange;
 }
