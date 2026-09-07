@@ -1,11 +1,17 @@
 [build]
+  command = "curl -sSf https://dl.flutter.dev/linux/flutter_linux_3.24.0-stable.tar.xz | tar xJ -C /opt && export PATH=\"/opt/flutter/bin:$PATH\" && flutter precache && flutter build web --release"
   publish = "build/web"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
 
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "DENY"
-    X-Content-Type-Options = "nosniff"
-    Referrer-Policy = "strict-origin-when-cross-origin"
+    Content-Security-Policy = "default-src 'self' https:; connect-src 'self' https://api.emailjs.com https://ovkefbochqbqrtwjfraz.supabase.co wss://ovkefbochqbqrtwjfraz.supabase.co ws://localhost:* http://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' https: data:; img-src 'self' https: data: blob:;"
     Permissions-Policy = "geolocation=(), microphone=(), camera=()"
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net https://www.gstatic.com; connect-src 'self' https://ovkefbochqbqrtwjfraz.supabase.co https://www.gstatic.com https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob:;"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
