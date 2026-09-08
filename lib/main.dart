@@ -35,13 +35,123 @@ class MyApp extends StatelessWidget {
           elevation: 0,
         ),
       ),
-      initialRoute: '/login', // ✅ Direct login
+      initialRoute: '/login',
       routes: {
         '/login': (_) => const LoginScreen(),
-        '/student': (_) => const StudentHomeScreen(),
-        '/admin': (_) => const AdminHomeScreen(),
-        '/create-event': (_) => const CreateEventScreen(),
+        '/student': (_) => const AuthGuard(child: StudentHomeScreen()),
+        '/admin': (_) => const AdminGuard(child: AdminHomeScreen()),
+        '/create-event': (_) => const AuthGuard(child: CreateEventScreen()),
       },
     );
+  }
+}
+
+// ── Auth Guard ──────────────────────────────────────────────────────────────
+class AuthGuard extends StatefulWidget {
+  final Widget child;
+  const AuthGuard({super.key, required this.child});
+
+  @override
+  State<AuthGuard> createState() => _AuthGuardState();
+}
+
+class _AuthGuardState extends State<AuthGuard> {
+  bool _isLoading = true;
+  bool _isAuthenticated = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  Future<void> _checkAuth() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    setState(() {
+      _isAuthenticated = session != null;
+      _isLoading = false;
+    });
+
+    if (!_isAuthenticated && mounted) {
+      Navigator.pushReplacementNamed(context, '/login');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!_isAuthenticated) return const SizedBox.shrink();
+    return widget.child;
+  }
+}
+
+// ── Admin Guard ─────────────────────────────────────────────────────────────
+class AdminGuard extends StatefulWidget {
+  final Widget child;
+  const AdminGuard({super.key, required this.child});
+
+  @override
+  State<AdminGuard> createState() => _AdminGuardState();
+}
+
+class _AdminGuardState extends State<AdminGuard> {
+  bool _isLoading = true;
+  bool _isAdmin = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAdmin();
+  }
+
+  Future<void> _checkAdmin() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
+
+    try {
+      final response = await Supabase.instance.client
+          .from('users')
+          .select('role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+      final role = response?['role'] as String? ?? 'student';
+      setState(() {
+        _isAdmin = role == 'admin';
+        _isLoading = false;
+      });
+
+      if (!_isAdmin && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Admin access only'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.pushReplacementNamed(context, '/student');
+      }
+    } catch (e) {
+      debugPrint('❌ Admin check error: $e');
+      setState(() => _isLoading = false);
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!_isAdmin) return const SizedBox.shrink();
+    return widget.child;
   }
 }
