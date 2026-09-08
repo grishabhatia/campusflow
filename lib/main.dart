@@ -38,7 +38,7 @@ class MyApp extends StatelessWidget {
       initialRoute: '/login',
       routes: {
         '/login': (_) => const LoginScreen(),
-        '/student': (_) => const AuthGuard(child: StudentHomeScreen()),
+        '/student': (_) => const StudentGuard(child: StudentHomeScreen()),
         '/admin': (_) => const AdminGuard(child: AdminHomeScreen()),
         '/create-event': (_) => const AuthGuard(child: CreateEventScreen()),
       },
@@ -46,7 +46,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-// ── Auth Guard ──────────────────────────────────────────────────────────────
+// ── Auth Guard (Sirf session check) ──────────────────────────────────────
 class AuthGuard extends StatefulWidget {
   final Widget child;
   const AuthGuard({super.key, required this.child});
@@ -72,7 +72,6 @@ class _AuthGuardState extends State<AuthGuard> {
       _isLoading = false;
     });
 
-    // ✅ Agar session nahi hai toh login pe bhejo
     if (!_isAuthenticated && mounted) {
       Navigator.pushReplacementNamed(context, '/login');
     }
@@ -85,8 +84,72 @@ class _AuthGuardState extends State<AuthGuard> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    // ✅ Agar authenticated nahi hai toh kuch mat dikhao (redirect ho jayega)
     if (!_isAuthenticated) return const SizedBox.shrink();
+    return widget.child;
+  }
+}
+
+// ── Student Guard ──────────────────────────────────────────────────────────
+class StudentGuard extends StatefulWidget {
+  final Widget child;
+  const StudentGuard({super.key, required this.child});
+
+  @override
+  State<StudentGuard> createState() => _StudentGuardState();
+}
+
+class _StudentGuardState extends State<StudentGuard> {
+  bool _isLoading = true;
+  bool _isStudent = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkStudent();
+  }
+
+  Future<void> _checkStudent() async {
+    final session = Supabase.instance.client.auth.currentSession;
+    
+    if (session == null) {
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
+
+    try {
+      final response = await Supabase.instance.client
+          .from('users')
+          .select('role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+
+      final role = response?['role'] as String? ?? 'student';
+      debugPrint('👤 StudentGuard - Role: $role');
+      
+      setState(() {
+        // ✅ Admin bhi student access kar sakta hai
+        _isStudent = role == 'student' || role == 'admin';
+        _isLoading = false;
+      });
+
+      if (!_isStudent && mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
+    } catch (e) {
+      debugPrint('❌ Student check error: $e');
+      setState(() => _isLoading = false);
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!_isStudent) return const SizedBox.shrink();
     return widget.child;
   }
 }
@@ -113,16 +176,12 @@ class _AdminGuardState extends State<AdminGuard> {
   Future<void> _checkAdmin() async {
     final session = Supabase.instance.client.auth.currentSession;
     
-    // ✅ Agar session nahi hai toh login pe bhejo
     if (session == null) {
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/login');
-      }
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
       return;
     }
 
     try {
-      // ✅ Database se role fetch karo
       final response = await Supabase.instance.client
           .from('users')
           .select('role')
@@ -137,7 +196,6 @@ class _AdminGuardState extends State<AdminGuard> {
         _isLoading = false;
       });
 
-      // ✅ Agar admin nahi hai toh student dashboard pe bhejo
       if (!_isAdmin && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -150,9 +208,7 @@ class _AdminGuardState extends State<AdminGuard> {
     } catch (e) {
       debugPrint('❌ Admin check error: $e');
       setState(() => _isLoading = false);
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/login');
-      }
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
     }
   }
 
@@ -163,7 +219,6 @@ class _AdminGuardState extends State<AdminGuard> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
-    // ✅ Agar admin nahi hai toh kuch mat dikhao (redirect ho jayega)
     if (!_isAdmin) return const SizedBox.shrink();
     return widget.child;
   }
