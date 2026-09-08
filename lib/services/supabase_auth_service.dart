@@ -44,7 +44,7 @@ class SupabaseAuthService {
     try {
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: 'http://localhost:3000',
+        redirectTo: 'https://mriirscampusflow.netlify.app', // ✅ UPDATED
       );
     } catch (e) {
       debugPrint('❌ Google Sign In error: $e');
@@ -55,7 +55,10 @@ class SupabaseAuthService {
   // ── Forgot Password ────────────────────────────────────────────────────────
   Future<void> resetPassword(String email) async {
     try {
-      await supabase.auth.resetPasswordForEmail(email);
+      await supabase.auth.resetPasswordForEmail(
+        email,
+        redirectTo: 'https://mriirscampusflow.netlify.app/update-password', // ✅ ADDED
+      );
       debugPrint('✅ Password reset email sent to $email');
     } catch (e) {
       debugPrint('❌ Password reset error: $e');
@@ -119,7 +122,7 @@ class SupabaseAuthService {
             ?? user?.userMetadata?['full_name']
             ?? user?.userMetadata?['name']
             ?? email?.split('@')[0]
-            ?? 'User';  // ✅ YAHAN CHANGE — 'Student' → 'User'
+            ?? 'User';
 
         final resolvedEmail = email ?? user?.email ?? '';
 
