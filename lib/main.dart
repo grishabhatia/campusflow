@@ -72,6 +72,7 @@ class _AuthGuardState extends State<AuthGuard> {
       _isLoading = false;
     });
 
+    // ✅ Agar session nahi hai toh login pe bhejo
     if (!_isAuthenticated && mounted) {
       Navigator.pushReplacementNamed(context, '/login');
     }
@@ -84,6 +85,7 @@ class _AuthGuardState extends State<AuthGuard> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
+    // ✅ Agar authenticated nahi hai toh kuch mat dikhao (redirect ho jayega)
     if (!_isAuthenticated) return const SizedBox.shrink();
     return widget.child;
   }
@@ -110,12 +112,17 @@ class _AdminGuardState extends State<AdminGuard> {
 
   Future<void> _checkAdmin() async {
     final session = Supabase.instance.client.auth.currentSession;
+    
+    // ✅ Agar session nahi hai toh login pe bhejo
     if (session == null) {
-      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
       return;
     }
 
     try {
+      // ✅ Database se role fetch karo
       final response = await Supabase.instance.client
           .from('users')
           .select('role')
@@ -123,11 +130,14 @@ class _AdminGuardState extends State<AdminGuard> {
           .maybeSingle();
 
       final role = response?['role'] as String? ?? 'student';
+      debugPrint('👤 AdminGuard - Role: $role');
+      
       setState(() {
         _isAdmin = role == 'admin';
         _isLoading = false;
       });
 
+      // ✅ Agar admin nahi hai toh student dashboard pe bhejo
       if (!_isAdmin && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -140,7 +150,9 @@ class _AdminGuardState extends State<AdminGuard> {
     } catch (e) {
       debugPrint('❌ Admin check error: $e');
       setState(() => _isLoading = false);
-      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     }
   }
 
@@ -151,6 +163,7 @@ class _AdminGuardState extends State<AdminGuard> {
         body: Center(child: CircularProgressIndicator()),
       );
     }
+    // ✅ Agar admin nahi hai toh kuch mat dikhao (redirect ho jayega)
     if (!_isAdmin) return const SizedBox.shrink();
     return widget.child;
   }
