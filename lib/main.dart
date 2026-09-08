@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth/login_screen.dart';
+import 'screens/auth/update_password_screen.dart'; // ✅ ADDED
 import 'screens/student/student_home_screen.dart';
 import 'screens/student/create_event_screen.dart';
 import 'screens/admin/admin_home_screen.dart';
@@ -41,6 +42,7 @@ class MyApp extends StatelessWidget {
         '/student': (_) => const StudentGuard(child: StudentHomeScreen()),
         '/admin': (_) => const AdminGuard(child: AdminHomeScreen()),
         '/create-event': (_) => const AuthGuard(child: CreateEventScreen()),
+        '/update-password': (_) => const UpdatePasswordScreen(), // ✅ ADDED
       },
     );
   }
@@ -127,7 +129,6 @@ class _StudentGuardState extends State<StudentGuard> {
       debugPrint('👤 StudentGuard - Role: $role');
       
       setState(() {
-        // ✅ Admin bhi student access kar sakta hai
         _isStudent = role == 'student' || role == 'admin';
         _isLoading = false;
       });
