@@ -23,9 +23,9 @@ dependencies:
   url_launcher: ^6.3.0
   emailjs: ^4.0.0
 
-  # ✅ NEW — Excel download ke liye
+  # ✅ FIX: Netlify (Flutter 3.27.0) ke saath compatible version
   path_provider: ^2.1.4
-  file_saver: ^0.3.1        # ✅ FIX: 0.2.14 → 0.3.1
+  file_saver: ^0.2.14        # ✅ 0.3.1 → 0.2.14 (Netlify fix)
 
 dev_dependencies:
   flutter_test:
