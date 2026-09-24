@@ -21,7 +21,11 @@ dependencies:
   fl_chart: ^0.68.0
   shared_preferences: ^2.3.0
   url_launcher: ^6.3.0
-  emailjs: ^4.0.0  # ✅ ADD THIS
+  emailjs: ^4.0.0
+
+  # ✅ NEW — Excel download ke liye
+  path_provider: ^2.1.4
+  file_saver: ^0.3.1        # ✅ FIX: 0.2.14 → 0.3.1
 
 dev_dependencies:
   flutter_test:

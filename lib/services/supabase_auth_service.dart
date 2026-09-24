@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'email_service.dart';
 
 class SupabaseAuthService {
   SupabaseClient get supabase => Supabase.instance.client;
+  final _emailService = EmailService();
 
   // ── Current User Getters ──────────────────────────────────────────────────
   User? get currentUser => supabase.auth.currentUser;
@@ -44,7 +46,7 @@ class SupabaseAuthService {
     try {
       await supabase.auth.signInWithOAuth(
         OAuthProvider.google,
-        redirectTo: 'https://mriirscampusflow.netlify.app', // ✅ UPDATED
+        redirectTo: 'https://mriirscampusflow.netlify.app',
       );
     } catch (e) {
       debugPrint('❌ Google Sign In error: $e');
@@ -52,14 +54,19 @@ class SupabaseAuthService {
     }
   }
 
-  // ── Forgot Password ────────────────────────────────────────────────────────
+  // ── Forgot Password (Using EmailJS) ───────────────────────────────────────
   Future<void> resetPassword(String email) async {
     try {
-      await supabase.auth.resetPasswordForEmail(
-        email,
-        redirectTo: 'https://mriirscampusflow.netlify.app/update-password', // ✅ ADDED
+      // ✅ Generate reset link manually
+      final resetLink = 'https://mriirscampusflow.netlify.app/#/update-password';
+
+      // ✅ Send email via EmailJS (Supabase rate limit bypass)
+      await _emailService.sendPasswordResetEmail(
+        toEmail: email,
+        resetLink: resetLink,
       );
-      debugPrint('✅ Password reset email sent to $email');
+
+      debugPrint('✅ Password reset email sent to $email via EmailJS');
     } catch (e) {
       debugPrint('❌ Password reset error: $e');
       rethrow;

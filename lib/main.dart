@@ -1,10 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/auth/login_screen.dart';
-import 'screens/auth/update_password_screen.dart'; // ✅ ADDED
+import 'screens/auth/update_password_screen.dart';
 import 'screens/student/student_home_screen.dart';
 import 'screens/student/create_event_screen.dart';
 import 'screens/admin/admin_home_screen.dart';
+import 'screens/department/department_home_screen.dart';
+import 'screens/registrar/registrar_home_screen.dart';
+import 'services/reminder_service.dart';
 
 final supabase = Supabase.instance.client;
 
@@ -16,7 +20,37 @@ void main() async {
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im92a2VmYm9jaHFicXJ0d2pmcmF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI0Mjc5MzksImV4cCI6MjA5ODAwMzkzOX0.dj4c50cfHP1GwNFtgRqKgJ7y7AkrLfYiwlLKbYNy_GA',
   );
 
+  // ✅ Startup pe reminder check
+  _checkRemindersOnStart();
+
+  // ✅ TESTING MODE: Har 1 minute reminder check
+  // Production ke liye: Duration(hours: 6)
+  Timer.periodic(const Duration(minutes: 1), (timer) async {
+    try {
+      debugPrint('⏰ Periodic reminder check running...');
+      final reminderService = ReminderService();
+      await reminderService.checkAndSendReminders();
+    } catch (e) {
+      debugPrint('❌ Periodic reminder error: $e');
+    }
+  });
+
   runApp(const MyApp());
+}
+
+// ✅ Background Reminder Check
+Future<void> _checkRemindersOnStart() async {
+  try {
+    await Future.delayed(const Duration(seconds: 5));
+
+    debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    debugPrint('📧 Running startup reminder check...');
+
+    final reminderService = ReminderService();
+    await reminderService.checkAndSendReminders();
+  } catch (e) {
+    debugPrint('❌ Startup reminder error: $e');
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -37,18 +71,64 @@ class MyApp extends StatelessWidget {
         ),
       ),
       initialRoute: '/login',
-      routes: {
-        '/login': (_) => const LoginScreen(),
-        '/student': (_) => const StudentGuard(child: StudentHomeScreen()),
-        '/admin': (_) => const AdminGuard(child: AdminHomeScreen()),
-        '/create-event': (_) => const AuthGuard(child: CreateEventScreen()),
-        '/update-password': (_) => const UpdatePasswordScreen(), // ✅ ADDED
+      onGenerateRoute: (settings) {
+        final routeName = settings.name ?? '';
+
+        if (routeName.contains('update-password') ||
+            routeName.contains('access_token') ||
+            routeName.contains('error=') ||
+            routeName.contains('type=recovery')) {
+          return MaterialPageRoute(
+            builder: (_) => const UpdatePasswordScreen(),
+          );
+        }
+
+        switch (routeName) {
+          case '/login':
+            return MaterialPageRoute(builder: (_) => const LoginScreen());
+          case '/student':
+            return MaterialPageRoute(
+              builder: (_) => const StudentGuard(child: StudentHomeScreen()),
+            );
+          case '/admin':
+            return MaterialPageRoute(
+              builder: (_) => const AdminGuard(child: AdminHomeScreen()),
+            );
+          case '/create-event':
+            return MaterialPageRoute(
+              builder: (_) => const AuthGuard(child: CreateEventScreen()),
+            );
+          case '/update-password':
+            return MaterialPageRoute(
+              builder: (_) => const UpdatePasswordScreen(),
+            );
+          case '/department-cse':
+            return MaterialPageRoute(
+              builder: (_) => const DepartmentGuard(
+                department: 'CSE',
+                child: DepartmentHomeScreen(department: 'CSE'),
+              ),
+            );
+          case '/department-civil':
+            return MaterialPageRoute(
+              builder: (_) => const DepartmentGuard(
+                department: 'Civil',
+                child: DepartmentHomeScreen(department: 'Civil'),
+              ),
+            );
+          case '/registrar':
+            return MaterialPageRoute(
+              builder: (_) => const RegistrarGuard(child: RegistrarHomeScreen()),
+            );
+          default:
+            return MaterialPageRoute(builder: (_) => const LoginScreen());
+        }
       },
     );
   }
 }
 
-// ── Auth Guard (Sirf session check) ──────────────────────────────────────
+// ── Auth Guard ───────────────────────────────────────────────────────────
 class AuthGuard extends StatefulWidget {
   final Widget child;
   const AuthGuard({super.key, required this.child});
@@ -82,16 +162,14 @@ class _AuthGuardState extends State<AuthGuard> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (!_isAuthenticated) return const SizedBox.shrink();
     return widget.child;
   }
 }
 
-// ── Student Guard ──────────────────────────────────────────────────────────
+// ── Student Guard ────────────────────────────────────────────────────────
 class StudentGuard extends StatefulWidget {
   final Widget child;
   const StudentGuard({super.key, required this.child});
@@ -112,7 +190,7 @@ class _StudentGuardState extends State<StudentGuard> {
 
   Future<void> _checkStudent() async {
     final session = Supabase.instance.client.auth.currentSession;
-    
+
     if (session == null) {
       if (mounted) Navigator.pushReplacementNamed(context, '/login');
       return;
@@ -126,8 +204,7 @@ class _StudentGuardState extends State<StudentGuard> {
           .maybeSingle();
 
       final role = response?['role'] as String? ?? 'student';
-      debugPrint('👤 StudentGuard - Role: $role');
-      
+
       setState(() {
         _isStudent = role == 'student' || role == 'admin';
         _isLoading = false;
@@ -137,7 +214,6 @@ class _StudentGuardState extends State<StudentGuard> {
         Navigator.pushReplacementNamed(context, '/login');
       }
     } catch (e) {
-      debugPrint('❌ Student check error: $e');
       setState(() => _isLoading = false);
       if (mounted) Navigator.pushReplacementNamed(context, '/login');
     }
@@ -146,16 +222,14 @@ class _StudentGuardState extends State<StudentGuard> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (!_isStudent) return const SizedBox.shrink();
     return widget.child;
   }
 }
 
-// ── Admin Guard ─────────────────────────────────────────────────────────────
+// ── Admin Guard ──────────────────────────────────────────────────────────
 class AdminGuard extends StatefulWidget {
   final Widget child;
   const AdminGuard({super.key, required this.child});
@@ -176,7 +250,7 @@ class _AdminGuardState extends State<AdminGuard> {
 
   Future<void> _checkAdmin() async {
     final session = Supabase.instance.client.auth.currentSession;
-    
+
     if (session == null) {
       if (mounted) Navigator.pushReplacementNamed(context, '/login');
       return;
@@ -190,8 +264,7 @@ class _AdminGuardState extends State<AdminGuard> {
           .maybeSingle();
 
       final role = response?['role'] as String? ?? 'student';
-      debugPrint('👤 AdminGuard - Role: $role');
-      
+
       setState(() {
         _isAdmin = role == 'admin';
         _isLoading = false;
@@ -207,7 +280,6 @@ class _AdminGuardState extends State<AdminGuard> {
         Navigator.pushReplacementNamed(context, '/student');
       }
     } catch (e) {
-      debugPrint('❌ Admin check error: $e');
       setState(() => _isLoading = false);
       if (mounted) Navigator.pushReplacementNamed(context, '/login');
     }
@@ -216,11 +288,139 @@ class _AdminGuardState extends State<AdminGuard> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     if (!_isAdmin) return const SizedBox.shrink();
+    return widget.child;
+  }
+}
+
+// ── Department Guard ─────────────────────────────────────────────────────
+class DepartmentGuard extends StatefulWidget {
+  final String department;
+  final Widget child;
+
+  const DepartmentGuard({
+    super.key,
+    required this.department,
+    required this.child,
+  });
+
+  @override
+  State<DepartmentGuard> createState() => _DepartmentGuardState();
+}
+
+class _DepartmentGuardState extends State<DepartmentGuard> {
+  bool _isLoading = true;
+  bool _isAuthorized = false;
+
+  static const _deptEmails = {
+    'CSE': '07vaishnavi.official@gmail.com',
+    'Civil': 'grishabhatia2@gmail.com',
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAccess();
+  }
+
+  Future<void> _checkAccess() async {
+    final session = Supabase.instance.client.auth.currentSession;
+
+    if (session == null) {
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
+
+    final userEmail = session.user.email ?? '';
+    final allowedEmail = _deptEmails[widget.department] ?? '';
+
+    if (userEmail == allowedEmail) {
+      setState(() {
+        _isAuthorized = true;
+        _isLoading = false;
+      });
+    } else {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Access denied'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.pushReplacementNamed(context, '/login');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (!_isAuthorized) return const SizedBox.shrink();
+    return widget.child;
+  }
+}
+
+// ── Registrar Guard ──────────────────────────────────────────────────────
+class RegistrarGuard extends StatefulWidget {
+  final Widget child;
+  const RegistrarGuard({super.key, required this.child});
+
+  @override
+  State<RegistrarGuard> createState() => _RegistrarGuardState();
+}
+
+class _RegistrarGuardState extends State<RegistrarGuard> {
+  bool _isLoading = true;
+  bool _isRegistrar = false;
+
+  static const _registrarEmail = 'v02816754@gmail.com';
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAccess();
+  }
+
+  Future<void> _checkAccess() async {
+    final session = Supabase.instance.client.auth.currentSession;
+
+    if (session == null) {
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+      return;
+    }
+
+    final userEmail = session.user.email ?? '';
+
+    if (userEmail == _registrarEmail) {
+      setState(() {
+        _isRegistrar = true;
+        _isLoading = false;
+      });
+    } else {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Registrar access only'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        Navigator.pushReplacementNamed(context, '/login');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (!_isRegistrar) return const SizedBox.shrink();
     return widget.child;
   }
 }

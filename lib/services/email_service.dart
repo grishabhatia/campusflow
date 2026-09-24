@@ -4,10 +4,10 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EmailService {
-  // ✅ SERVICE ID CHECK KARO — EmailJS Dashboard mein konsi service use kar rahe ho?
-  static const _serviceId     = 'service_68vde1j';  // ← YE CHANGE KARO AGAR service_lutnymb HAI TOH
-  static const _templateId    = 'template_gu3h19k';
-  static const _publicKey     = 'krVk8P4Wp03tLhl1R';
+  // 🔑 YOUR EMAILJS CREDENTIALS (NEW)
+  static const _serviceId     = 'service_nuz63ki';
+  static const _templateId    = 'template_vga9c6u';
+  static const _publicKey     = 'GiJo_DIeH0HgE18OX';
   static const _facilityEmail = '0003vaishnavi@gmail.com';
 
   // ── Core send method ───────────────────────────────────────────────────────
@@ -19,7 +19,6 @@ class EmailService {
     debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     debugPrint('📧 TO: $toEmail');
     debugPrint('📧 SUBJECT: $subject');
-    debugPrint('📧 BODY: $body');
 
     try {
       final payload = jsonEncode({
@@ -30,24 +29,21 @@ class EmailService {
           'to_email': toEmail,
           'subject': subject,
           'message': body,
-          'name': toEmail.split('@')[0],  // ✅ Added for template
-          'time': DateTime.now().toString(),  // ✅ Added for template
+          'name': toEmail.split('@')[0],
+          'time': DateTime.now().toString(),
         },
       });
-
-      debugPrint('📧 Payload: $payload');
 
       final res = await http.post(
         Uri.parse('https://api.emailjs.com/api/v1.0/email/send'),
         headers: {
           'Content-Type': 'application/json',
-          'Origin': 'http://localhost:3000',  // ✅ CORS fix
+          'Origin': 'http://localhost:3000',
         },
         body: payload,
       );
 
       debugPrint('📧 Status: ${res.statusCode}');
-      debugPrint('📧 Response: ${res.body}');
 
       if (res.statusCode == 200) {
         debugPrint('✅ Email SENT to $toEmail');
@@ -78,14 +74,13 @@ class EmailService {
         'sent': false,
         'created_at': DateTime.now().toIso8601String(),
       });
-      debugPrint('✅ Queued email for $toEmail');
     } catch (e) {
       debugPrint('❌ Queue error: $e');
     }
   }
 
   // ── EMAIL 1: Facility Email ──────────────────────────────────────────────
-  Future<void> sendFacilityEmail({
+  Future<bool> sendFacilityEmail({
     required String eventName,
     required String eventDate,
     required String eventTime,
@@ -95,15 +90,12 @@ class EmailService {
     required String userName,
     required String userEmail,
   }) async {
-    debugPrint('📸 sendFacilityEmail called');
-    debugPrint('   photography=$photography videography=$videography');
-
     final facility = [
       if (photography) 'Still Photography',
       if (videography) 'Videography',
     ].join(' & ');
 
-    await _send(
+    return await _send(
       toEmail: _facilityEmail,
       subject: '📸 Facility Request: $facility — $eventName',
       body: '''
@@ -111,27 +103,21 @@ Hello Facilities Team,
 
 A new event requires $facility arrangements.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EVENT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Event    : $eventName
 Date     : $eventDate
 Time     : $eventTime
-Venue    : $venue, Manav Rachna University
+Venue    : $venue
 Facility : $facility
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Requested By : $userName ($userEmail)
 
 Please arrange 48 hours prior to the event.
-
-CampusFlow AI — +91-8800734239 | Extn. 8217
 ''',
     );
   }
 
   // ── EMAIL 2: Approval Email ──────────────────────────────────────────────
-  Future<void> sendApprovalEmail({
+  Future<bool> sendApprovalEmail({
     required String toEmail,
     required String userName,
     required String eventName,
@@ -139,9 +125,9 @@ CampusFlow AI — +91-8800734239 | Extn. 8217
     required String eventTime,
     required String venue,
   }) async {
-    debugPrint('✅ sendApprovalEmail called → $toEmail');
+    debugPrint('✅ sendApprovalEmail → $toEmail');
 
-    await _send(
+    return await _send(
       toEmail: toEmail,
       subject: '🎉 Your Event Request has been Approved!',
       body: '''
@@ -149,34 +135,27 @@ Dear $userName,
 
 Your event request has been approved! 🎉
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EVENT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Event : $eventName
 Date  : $eventDate
 Time  : $eventTime
-Venue : $venue, Manav Rachna University
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Venue : $venue
 
-For assistance, please contact:
+For assistance:
 📞 +91-8800734239 | Extn. 8217
 📧 manager.admin@mrvpl.in
-
-CampusFlow Smart Team
-Manav Rachna International Institute of Research and Studies
 ''',
     );
   }
 
   // ── EMAIL 3: Rejection Email ─────────────────────────────────────────────
-  Future<void> sendRejectionEmail({
+  Future<bool> sendRejectionEmail({
     required String toEmail,
     required String userName,
     required String eventName,
     required String venue,
     required String reason,
   }) async {
-    await _send(
+    return await _send(
       toEmail: toEmail,
       subject: '❌ Update on Your Event Request — $eventName',
       body: '''
@@ -184,26 +163,17 @@ Dear $userName,
 
 Your event request was not approved.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EVENT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Event  : $eventName
 Venue  : $venue
 ${reason.isNotEmpty ? 'Reason : $reason' : ''}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Please submit a new request with a different time or venue.
-
-📞 +91-8800734239 | Extn. 8217
-📧 manager.admin@mrvpl.in
-
-CampusFlow AI Team
+Please submit a new request.
 ''',
     );
   }
 
   // ── EMAIL 4: Cancellation Email ──────────────────────────────────────────
-  Future<void> sendCancellationEmail({
+  Future<bool> sendCancellationEmail({
     required String studentEmail,
     required String userName,
     required String eventName,
@@ -213,8 +183,7 @@ CampusFlow AI Team
     required bool photography,
     required bool videography,
   }) async {
-    // To student
-    await _send(
+    final studentSent = await _send(
       toEmail: studentEmail,
       subject: '❌ Your Event has been Cancelled — $eventName',
       body: '''
@@ -222,25 +191,13 @@ Dear $userName,
 
 Your event has been cancelled.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EVENT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Event : $eventName
 Date  : $eventDate
 Time  : $eventTime
 Venue : $venue
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-If this was a mistake, please contact the admin office.
-
-📞 +91-8800734239 | Extn. 8217
-📧 manager.admin@mrvpl.in
-
-CampusFlow AI Team
 ''',
     );
 
-    // To facility team
     final facility = [
       if (photography) 'Still Photography',
       if (videography) 'Videography',
@@ -251,31 +208,22 @@ CampusFlow AI Team
         toEmail: _facilityEmail,
         subject: '❌ Event Cancelled — $eventName',
         body: '''
-Hello Facilities Team,
-
 The following event has been CANCELLED.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-EVENT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Event    : $eventName
 Date     : $eventDate
 Time     : $eventTime
 Venue    : $venue
 Facility : $facility
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Facilities are no longer required.
-
-CampusFlow AI — Manav Rachna University
-📞 +91-8800734239 | Extn. 8217
 ''',
       );
     }
+
+    return studentSent;
   }
 
   // ── EMAIL 5: Clash Email ─────────────────────────────────────────────────
-  Future<void> sendClashEmail({
+  Future<bool> sendClashEmail({
     required String toEmail,
     required String userName,
     required String eventName,
@@ -288,14 +236,12 @@ CampusFlow AI — Manav Rachna University
     for (int i = 0; i < clashes.length; i++) {
       final c = clashes[i];
       clashDetails += '''
-${i + 1}. ${c['event_name'] ?? c['clashingEventName'] ?? 'Untitled Event'}
-   🕐 ${c['time_from'] ?? c['fromTime'] ?? 'N/A'} → ${c['time_to'] ?? c['toTime'] ?? 'N/A'}
-   👤 ${c['organizerName'] ?? 'Unknown'}
-
+${i + 1}. ${c['event_name'] ?? 'Untitled Event'}
+   🕐 ${c['time_from'] ?? 'N/A'} → ${c['time_to'] ?? 'N/A'}
 ''';
     }
 
-    await _send(
+    return await _send(
       toEmail: toEmail,
       subject: '⚠️ Clash Detected in Your Event Request',
       body: '''
@@ -303,27 +249,79 @@ Dear $userName,
 
 Your event request has a clash with another approved event.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-YOUR EVENT DETAILS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📌 Event : $eventName
-📅 Date  : $eventDate
-🕐 Time  : $eventTime
-📍 Venue : $venue
+Event : $eventName
+Date  : $eventDate
+Time  : $eventTime
+Venue : $venue
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CLASHES FOUND
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CLASHES:
 $clashDetails
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-💡 Please choose another date, time, or venue.
+Please choose another date, time, or venue.
+''',
+    );
+  }
 
-For assistance:
-📞 +91-8800734239 | Extn. 8217
-📧 manager.admin@mrvpl.in
+  // ── EMAIL 6: Password Reset Email ────────────────────────────────────────
+  Future<bool> sendPasswordResetEmail({
+    required String toEmail,
+    required String resetLink,
+  }) async {
+    return await _send(
+      toEmail: toEmail,
+      subject: '🔐 Reset Your Password - CampusFlow Smart',
+      body: '''
+Hello,
 
-CampusFlow AI Team
+We received a request to reset your password.
+
+Click the link below:
+$resetLink
+
+This link will expire in 24 hours.
+''',
+    );
+  }
+
+  // ── EMAIL 7: Reminder Email ──────────────────────────────────────────────
+  // ✅ FIXED: Return type Future<bool>
+  // ✅ FIXED: "Pending Since" line removed
+  Future<bool> sendReminderEmail({
+    required String toEmail,
+    required String recipientRole,
+    required String eventName,
+    required String eventDate,
+    required String eventTime,
+    required String venue,
+    required String department,
+    required String requestedBy,
+    required int hoursSince,
+    required String loginLink,
+  }) async {
+    debugPrint('📧 sendReminderEmail → $toEmail ($recipientRole)');
+
+    return await _send(
+      toEmail: toEmail,
+      subject: '⏰ Reminder: Pending Event Approval - $eventName',
+      body: '''
+Dear $recipientRole,
+
+This is a friendly reminder that an event request is pending your approval.
+
+EVENT DETAILS
+Event       : $eventName
+Date        : $eventDate
+Time        : $eventTime
+Venue       : $venue
+Department  : $department
+Requested By: $requestedBy
+
+Please login to approve or reject this event:
+🔗 $loginLink
+
+---
+CampusFlow Smart
+Manav Rachna University
 ''',
     );
   }

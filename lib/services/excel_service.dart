@@ -1,106 +1,119 @@
+import 'dart:io';
 import 'package:excel/excel.dart';
-import 'package:universal_html/html.dart' as html;
-import 'admin_service.dart';
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:file_saver/file_saver.dart';
 
 class ExcelService {
-  final _adminService = AdminService();
+  /// ✅ Approved events ko Excel mein export karo
+  /// Sirf woh events jinka registrar_approved = true hai
+  Future<void> exportApprovedEvents() async {
+    try {
+      debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      debugPrint('📊 Excel export started...');
 
-  Future<void> exportToExcel() async {
-    final reqs = await _adminService.getAllRequisitions();
+      // ✅ Sirf fully approved events fetch karo
+      final response = await Supabase.instance.client
+          .from('requisitions')
+          .select('*')
+          .eq('registrar_approved', true)
+          .order('created_at', ascending: false);
 
-    final excel = Excel.createExcel();
-    final sheet = excel['Requisitions Report'];
+      final events = List<Map<String, dynamic>>.from(response);
 
-    // ─── Headers ───────────────────────────────────────────────────────
-    final headers = [
-      'Venue', 'Purpose', 'Organizer', 'Email',
-      'Booking Date', 'Booking Time',
-      'Event From', 'Event To',
-      'Expected Strength', 'No. of Slots',
-      'Status', 'Extra Furniture',
-    ];
+      debugPrint('📋 Total approved events: ${events.length}');
 
-    for (int i = 0; i < headers.length; i++) {
-      final cell = sheet.cell(
-        CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0),
-      );
-      cell.value = TextCellValue(headers[i]);
-      cell.cellStyle = CellStyle(
-        bold: true,
-        backgroundColorHex: ExcelColor.fromHexString('#1565C0'),
-        fontColorHex: ExcelColor.fromHexString('#FFFFFF'),
-        horizontalAlign: HorizontalAlign.Center,
-      );
-    }
-
-    // ─── Data rows ─────────────────────────────────────────────────────
-    for (int rowIdx = 0; rowIdx < reqs.length; rowIdx++) {
-      final r = reqs[rowIdx];
-      final user = r['users'] as Map<String, dynamic>?;
-      final slots = (r['slots'] as List?)?.length ?? 0;
-
-      final rowData = [
-        r['venue'] ?? '',
-        r['purpose'] ?? '',
-        user?['name'] ?? '',
-        user?['email'] ?? '',
-        r['booking_date'] ?? '',
-        r['booking_time'] ?? '',
-        r['event_time_from'] ?? '',
-        r['event_time_to'] ?? '',
-        r['expected_strength'] ?? '',
-        '$slots',
-        (r['status'] ?? '').toUpperCase(),
-        r['extra_furniture'] ?? '',
-      ];
-
-      for (int colIdx = 0; colIdx < rowData.length; colIdx++) {
-        final cell = sheet.cell(
-          CellIndex.indexByColumnRow(
-              columnIndex: colIdx, rowIndex: rowIdx + 1),
-        );
-        cell.value = TextCellValue(rowData[colIdx]);
-        if (rowIdx % 2 == 0) {
-          cell.cellStyle = CellStyle(
-            backgroundColorHex: ExcelColor.fromHexString('#E3F2FD'),
-          );
-        }
+      if (events.isEmpty) {
+        throw Exception('Koi approved event nahi hai Excel banane ke liye');
       }
+
+      // ✅ Excel workbook banao
+      final excel = Excel.createExcel();
+      final sheet = excel['Approved Events'];
+
+      // ✅ Header row
+      sheet.appendRow([
+        TextCellValue('Event Name'),
+        TextCellValue('Coordinator Name'),
+        TextCellValue('Phone No.'),
+        TextCellValue('Department'),
+        TextCellValue('Department Email'),
+        TextCellValue('Venue'),
+        TextCellValue('Event Date'),
+        TextCellValue('Event Time'),
+        TextCellValue('Requested By'),
+        TextCellValue('Approved At'),
+      ]);
+
+      // ✅ Header bold karo
+      for (int i = 0; i < 10; i++) {
+        final cell = sheet.cell(
+          CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0),
+        );
+        cell.cellStyle = CellStyle(
+          bold: true,
+          backgroundColorHex: ExcelColor.fromHexString('#1565C0'),
+          fontColorHex: ExcelColor.fromHexString('#FFFFFF'),
+        );
+      }
+
+      // ✅ Department emails map (same as reminder_service)
+      const deptEmails = {
+        'CSE': '07vaishnavi.official@gmail.com',
+        'Civil': 'grishabhatia2@gmail.com',
+      };
+
+      // ✅ Data rows add karo
+      for (final event in events) {
+        final dept = event['department'] ?? 'N/A';
+        final deptEmail = deptEmails[dept] ?? 'N/A';
+
+        // Signatures se coordinator info nikalo
+        final sigs = event['signatures'] as Map<String, dynamic>?;
+        final coordinatorName = sigs?['initiated_name'] ?? 'N/A';
+        final coordinatorPhone = sigs?['initiated_phone'] ?? 'N/A';
+
+        sheet.appendRow([
+          TextCellValue(event['purpose'] ?? 'N/A'),
+          TextCellValue(coordinatorName),
+          TextCellValue(coordinatorPhone),
+          TextCellValue(dept),
+          TextCellValue(deptEmail),
+          TextCellValue(event['venue'] ?? 'N/A'),
+          TextCellValue(event['booking_date'] ?? 'N/A'),
+          TextCellValue(
+            '${event['event_time_from'] ?? ''} - ${event['event_time_to'] ?? ''}',
+          ),
+          TextCellValue(event['user_email'] ?? 'N/A'),
+          TextCellValue(event['registrar_approved_at'] ?? 'N/A'),
+        ]);
+      }
+
+      // ✅ Column widths set karo (optional)
+      sheet.setColumnWidth(0, 30);
+      sheet.setColumnWidth(1, 25);
+      sheet.setColumnWidth(4, 30);
+      sheet.setColumnWidth(5, 25);
+
+      // ✅ File save karo
+      final bytes = excel.encode();
+      if (bytes == null) throw Exception('Excel encode failed');
+
+      final fileName =
+          'Approved_Events_${DateTime.now().toIso8601String().split('T').first}';
+
+      // ✅ Web + Desktop + Mobile sab pe download
+      await FileSaver.instance.saveFile(
+        name: fileName,
+        bytes: Uint8List.fromList(bytes),
+        fileExtension: 'xlsx',
+        mimeType: MimeType.microsoftExcel,
+      );
+
+      debugPrint('✅ Excel downloaded: $fileName.xlsx');
+    } catch (e) {
+      debugPrint('❌ Excel export error: $e');
+      rethrow;
     }
-
-    // ─── Column widths ─────────────────────────────────────────────────
-    sheet.setColumnWidth(0, 25);
-    sheet.setColumnWidth(1, 25);
-    sheet.setColumnWidth(2, 20);
-    sheet.setColumnWidth(3, 25);
-    sheet.setColumnWidth(4, 14);
-    sheet.setColumnWidth(5, 12);
-    sheet.setColumnWidth(6, 12);
-    sheet.setColumnWidth(7, 12);
-    sheet.setColumnWidth(8, 18);
-    sheet.setColumnWidth(9, 12);
-    sheet.setColumnWidth(10, 12);
-    sheet.setColumnWidth(11, 20);
-
-    // ─── Download ──────────────────────────────────────────────────────
-    final bytes = excel.encode();
-    if (bytes == null) throw Exception('Excel encoding failed');
-
-    final blob = html.Blob(
-      [bytes],
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    );
-    final url = html.Url.createObjectUrlFromBlob(blob);
-    final anchor = html.AnchorElement(href: url)
-      ..setAttribute(
-          'download',
-          'campusflow_requisitions_${_today()}.xlsx')
-      ..click();
-    html.Url.revokeObjectUrl(url);
-  }
-
-  String _today() {
-    final now = DateTime.now();
-    return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
   }
 }

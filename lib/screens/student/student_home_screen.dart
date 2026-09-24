@@ -113,6 +113,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
   }
 
+  // ✅ Status color based on final registrar approval
   Color _statusColor(String status) {
     switch (status) {
       case 'approved':
@@ -126,17 +127,55 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
     }
   }
 
-  String _statusLabel(String status) {
-    switch (status) {
-      case 'approved':
-        return '✅ Approved';
-      case 'rejected':
-        return '❌ Rejected';
-      case 'cancelled':
-        return '❌ Cancelled';
-      default:
-        return '⏳ Pending';
+  // ✅ Status label with APPROVAL STEP info
+  String _statusLabel(Map<String, dynamic> event) {
+    final status = event['status'] ?? 'pending';
+
+    // ✅ Check approval progress
+    final adminApproved = event['admin_approved'] == true;
+    final deptApproved = event['dept_approved'] == true;
+    final registrarApproved = event['registrar_approved'] == true;
+
+    // ✅ Final approved (Registrar approved)
+    if (registrarApproved && status == 'approved') {
+      return '✅ Final Approved';
     }
+
+    // ✅ Rejected
+    if (status == 'rejected') {
+      return '❌ Rejected';
+    }
+
+    // ✅ Cancelled
+    if (status == 'cancelled') {
+      return '❌ Cancelled';
+    }
+
+    // ✅ Pending — Show current step
+    if (deptApproved && !registrarApproved) {
+      return '⏳ Registrar Pending';
+    }
+    if (adminApproved && !deptApproved) {
+      return '⏳ Dept Pending';
+    }
+    return '⏳ Admin Pending';
+  }
+
+  // ✅ Status color based on pending step
+  Color _statusColorFromEvent(Map<String, dynamic> event) {
+    final status = event['status'] ?? 'pending';
+    final adminApproved = event['admin_approved'] == true;
+    final deptApproved = event['dept_approved'] == true;
+    final registrarApproved = event['registrar_approved'] == true;
+
+    if (registrarApproved && status == 'approved') return Colors.green;
+    if (status == 'rejected') return Colors.red;
+    if (status == 'cancelled') return Colors.grey;
+
+    // Pending steps
+    if (deptApproved && !registrarApproved) return Colors.purple;
+    if (adminApproved && !deptApproved) return Colors.blue;
+    return Colors.orange;
   }
 
   @override
@@ -187,7 +226,6 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ✅ FIXED: Hamesha email se name lo
                           Text(
                             'Welcome, ${_getDisplayNameFromEmail(_auth.currentUser?.email ?? '')}! 👋',
                             style: const TextStyle(
@@ -273,11 +311,11 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                               itemBuilder: (context, index) {
                                 final event = activeEvents[index];
                                 final status = event['status'] ?? 'pending';
-                                final color = _statusColor(status);
-                                final label = _statusLabel(status);
+                                final color = _statusColorFromEvent(event);
+                                final label = _statusLabel(event);
                                 final canEditEvent = _canEdit(event);
-                                final aiApproved = event['ai_approved'] == true;
                                 final clashDetected = event['clash_detected'] == true;
+                                final registrarApproved = event['registrar_approved'] == true;
 
                                 return Card(
                                   margin: const EdgeInsets.only(bottom: 10),
@@ -315,7 +353,7 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                               child: Text(
                                                 label,
                                                 style: TextStyle(
-                                                  fontSize: 11,
+                                                  fontSize: 10,
                                                   fontWeight: FontWeight.bold,
                                                   color: color,
                                                 ),
@@ -358,8 +396,9 @@ class _StudentHomeScreenState extends State<StudentHomeScreen> {
                                           spacing: 6,
                                           runSpacing: 4,
                                           children: [
-                                            if (aiApproved)
-                                              _badge('🤖 AI Approved', Colors.green),
+                                            // ✅ Final approval badge
+                                            if (registrarApproved)
+                                              _badge('✅ Registrar Approved', Colors.green),
                                             if (clashDetected)
                                               _badge('⚠️ Clash Detected', Colors.red),
                                           ],

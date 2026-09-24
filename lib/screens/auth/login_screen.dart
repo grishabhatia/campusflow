@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_auth_service.dart';
-import '../student/student_home_screen.dart';
-import '../admin/admin_home_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -19,16 +17,18 @@ class _LoginScreenState extends State<LoginScreen> {
   int _loginAttempts = 0;
   DateTime? _blockTime;
 
-  // ✅ Helper: Email se sirf letters extract karo (numbers hatao)
+  // ✅ Department + Registrar email mapping
+  static const _deptEmails = {
+    '07vaishnavi.official@gmail.com': 'CSE',
+    'grishabhatia2@gmail.com': 'Civil',
+    'v02816754@gmail.com': 'Registrar',
+  };
+
+  // ✅ Helper: Email se sirf letters extract karo
   String _getDisplayName(String email) {
-    final namePart = email.split('@')[0]; // grishabhatia62
-    
-    // Sirf letters rakho (a-z, A-Z)
+    final namePart = email.split('@')[0];
     final lettersOnly = namePart.replaceAll(RegExp(r'[^a-zA-Z]'), '');
-    
     if (lettersOnly.isEmpty) return 'User';
-    
-    // Capitalize first letter
     return lettersOnly[0].toUpperCase() + lettersOnly.substring(1);
   }
 
@@ -46,6 +46,31 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  // ✅ Role + Department + Registrar based navigation
+  void _navigateBasedOnUser(String email, String role) {
+    debugPrint('👤 Email: $email, Role: $role');
+
+    // ✅ Department/Registrar check karo pehle
+    if (_deptEmails.containsKey(email)) {
+      final dept = _deptEmails[email]!;
+      if (dept == 'CSE') {
+        Navigator.pushReplacementNamed(context, '/department-cse');
+      } else if (dept == 'Civil') {
+        Navigator.pushReplacementNamed(context, '/department-civil');
+      } else if (dept == 'Registrar') {
+        Navigator.pushReplacementNamed(context, '/registrar');
+      }
+      return;
+    }
+
+    // ✅ Admin/Student
+    Navigator.pushReplacementNamed(
+      context,
+      role == 'admin' ? '/admin' : '/student',
+    );
+  }
+
+  // ── Email Login ────────────────────────────────────────────────────────────
   Future<void> _login() async {
     if (_blockTime != null && DateTime.now().difference(_blockTime!).inMinutes < 5) {
       _err('Too many attempts. Try again after 5 minutes.');
@@ -64,7 +89,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       await _auth.login(email, password);
-
       if (!mounted) return;
 
       final userId = _auth.currentUserId;
@@ -75,21 +99,13 @@ class _LoginScreenState extends State<LoginScreen> {
         email: email,
         name: _getDisplayName(email),
       );
-
       if (!mounted) return;
 
       final role = await _auth.getUserRole(userId);
-
       if (!mounted) return;
 
       _loginAttempts = 0;
-
-      debugPrint('👤 Navigating to role: $role');
-
-      Navigator.pushReplacementNamed(
-        context,
-        role == 'admin' ? '/admin' : '/student',
-      );
+      _navigateBasedOnUser(email, role);
     } catch (e) {
       _loginAttempts++;
       if (_loginAttempts >= 5) {
@@ -102,11 +118,11 @@ class _LoginScreenState extends State<LoginScreen> {
     if (mounted) setState(() => _isLoading = false);
   }
 
+  // ── Google Sign In ─────────────────────────────────────────────────────────
   Future<void> _signInWithGoogle() async {
     setState(() => _isLoading = true);
     try {
       await _auth.signInWithGoogle();
-
       if (!mounted) return;
 
       final userId = _auth.currentUserId;
@@ -117,19 +133,12 @@ class _LoginScreenState extends State<LoginScreen> {
           email: email,
           name: _auth.currentUser?.userMetadata?['name'] ?? _getDisplayName(email),
         );
-
         if (!mounted) return;
 
         final role = await _auth.getUserRole(userId);
-
         if (!mounted) return;
 
-        debugPrint('👤 Google User Role: $role');
-
-        Navigator.pushReplacementNamed(
-          context,
-          role == 'admin' ? '/admin' : '/student',
-        );
+        _navigateBasedOnUser(email, role);
       }
     } catch (e) {
       if (mounted) _err('Google Sign In Error: $e');
@@ -137,6 +146,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (mounted) setState(() => _isLoading = false);
   }
 
+  // ── Forgot Password ────────────────────────────────────────────────────────
   void _showForgotPasswordDialog() {
     final emailController = TextEditingController();
 
@@ -171,14 +181,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Password reset email sent! Check your inbox.'),
+                    content: Text('✅ Password reset email sent! Check your inbox.'),
                     backgroundColor: Colors.green,
                   ),
                 );
               } catch (e) {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                  SnackBar(content: Text('❌ Error: $e'), backgroundColor: Colors.red),
                 );
               }
             },
@@ -193,6 +203,7 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  // ── Register Dialog ────────────────────────────────────────────────────────
   void _showRegisterDialog() {
     final nameController = TextEditingController();
     final emailController = TextEditingController();
@@ -239,14 +250,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
-                    content: Text('Registration successful! Please login.'),
+                    content: Text('✅ Registration successful! Please login.'),
                     backgroundColor: Colors.green,
                   ),
                 );
               } catch (e) {
                 if (!mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Register Error: $e'), backgroundColor: Colors.red),
+                  SnackBar(content: Text('❌ Register Error: $e'), backgroundColor: Colors.red),
                 );
               }
             },
@@ -264,92 +275,95 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.event, size: 80, color: Colors.blue),
-            const SizedBox(height: 20),
-            const Text(
-              'CampusFlow Smart',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 4),
-            // ✅ Email se naam dikhao (numbers hatao)
-            Text(
-              _emailController.text.isNotEmpty 
-                  ? 'Hello, ${_getDisplayName(_emailController.text)}! 👋'
-                  : 'Sign in to continue',
-              style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-            ),
-            const SizedBox(height: 40),
-            TextField(
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(
-                labelText: 'Email',
-                border: OutlineInputBorder(),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const SizedBox(height: 40),
+              const Icon(Icons.event, size: 80, color: Colors.blue),
+              const SizedBox(height: 20),
+              const Text(
+                'CampusFlow Smart',
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Password',
-                border: OutlineInputBorder(),
+              const SizedBox(height: 4),
+              Text(
+                _emailController.text.isNotEmpty
+                    ? 'Hello, ${_getDisplayName(_emailController.text)}! 👋'
+                    : 'Sign in to continue',
+                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
               ),
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton(
-                onPressed: _showForgotPasswordDialog,
-                child: const Text(
-                  'Forgot Password?',
-                  style: TextStyle(color: Colors.blue),
+              const SizedBox(height: 40),
+              TextField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  border: OutlineInputBorder(),
                 ),
               ),
-            ),
-            const SizedBox(height: 8),
-            if (_isLoading)
-              const CircularProgressIndicator()
-            else
-              ElevatedButton(
-                onPressed: _login,
-                style: ElevatedButton.styleFrom(
+              const SizedBox(height: 16),
+              TextField(
+                controller: _passwordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: _showForgotPasswordDialog,
+                  child: const Text(
+                    'Forgot Password?',
+                    style: TextStyle(color: Colors.blue),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (_isLoading)
+                const CircularProgressIndicator()
+              else
+                ElevatedButton(
+                  onPressed: _login,
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 50),
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('Login'),
+                ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _signInWithGoogle,
+                icon: const Icon(Icons.g_mobiledata, size: 30, color: Colors.red),
+                label: const Text(
+                  'Sign in with Google',
+                  style: TextStyle(fontSize: 16),
+                ),
+                style: OutlinedButton.styleFrom(
                   minimumSize: const Size(double.infinity, 50),
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.grey, width: 1.5),
                 ),
-                child: const Text('Login'),
               ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: _signInWithGoogle,
-              icon: const Icon(Icons.g_mobiledata, size: 30, color: Colors.red),
-              label: const Text(
-                'Sign in with Google',
-                style: TextStyle(fontSize: 16),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("Don't have an account?"),
+                  TextButton(
+                    onPressed: _showRegisterDialog,
+                    child: const Text('Register'),
+                  ),
+                ],
               ),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(double.infinity, 50),
-                side: const BorderSide(color: Colors.grey, width: 1.5),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text("Don't have an account?"),
-                TextButton(
-                  onPressed: _showRegisterDialog,
-                  child: const Text('Register'),
-                ),
-              ],
-            ),
-          ],
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
       ),
     );

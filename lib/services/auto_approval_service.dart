@@ -75,7 +75,6 @@ class AutoApprovalService {
     if (clashes.isNotEmpty) {
       await _clashService.saveClashDetails(id, clashes);
 
-      // Send clash email to student
       try {
         await _emailService.sendClashEmail(
           toEmail:   userEmail,
@@ -98,75 +97,20 @@ class AutoApprovalService {
       };
     }
 
-    // ── Step 3: Auto-Approve ───────────────────────────────────────────────
-    debugPrint('✅ No clash — updating status to approved...');
+    // ── Step 3: Auto-Approve REMOVED — Status Pending Rahega ──────────────
+    debugPrint('✅ No clash — keeping status as PENDING (manual approval required)');
 
-    try {
-      // Verify record exists first
-      final existing = await supabase
-          .from('requisitions')
-          .select('id, status')
-          .eq('id', id)
-          .maybeSingle();
-
-      debugPrint('📋 Current record: $existing');
-
-      if (existing == null) {
-        debugPrint('❌ Record not found for ID: $id');
-        return {'hasClash': false, 'clashes': [], 'approved': false, 'reason': 'Not found'};
-      }
-
-      // Update status
-      final result = await supabase
-          .from('requisitions')
-          .update({
-            'status':         'approved',
-            'ai_approved':    true,
-            'ai_score':       50,
-            'ai_reason':      '🤖 Auto-approved — no clash detected.',
-            'clash_detected': false,
-            'clash_details':  [],
-          })
-          .eq('id', id)
-          .select('id, status'); // ← verify update
-
-      debugPrint('📋 Update result: $result');
-
-      if (result.isNotEmpty && result[0]['status'] == 'approved') {
-        debugPrint('✅ Status updated to approved in DB');
-      } else {
-        debugPrint('❌ Update failed — check RLS in Supabase!');
-        debugPrint('👉 Run: ALTER TABLE requisitions DISABLE ROW LEVEL SECURITY;');
-      }
-    } catch (e) {
-      debugPrint('❌ Update error: $e');
-      return {'hasClash': false, 'clashes': [], 'approved': false, 'reason': 'Error: $e'};
-    }
-
-    // ── Step 4: Approval email to student ─────────────────────────────────
-    debugPrint('📧 Sending approval email to $userEmail...');
-    try {
-      await _emailService.sendApprovalEmail(
-        toEmail:   userEmail,
-        userName:  userName,
-        eventName: purpose,
-        eventDate: date,
-        eventTime: '$timeFrom → $timeTo',
-        venue:     venue,
-      );
-      debugPrint('✅ Approval email sent to $userEmail');
-    } catch (e) {
-      debugPrint('⚠️ Approval email error: $e');
-    }
+    // ✅ Status update NAHI karenge — pending hi rahega
+    // Admin manually approve karega
 
     debugPrint('━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
     return {
       'hasClash': false,
       'clashes':  [],
-      'approved': true,
-      'score':    50,
-      'reason':   '🤖 Auto-approved — no clash detected.',
+      'approved': false,  // ✅ Auto-approve hata diya
+      'pending':  true,   // ✅ Pending status
+      'reason':   '⏳ Waiting for admin approval.',
     };
   }
 }
